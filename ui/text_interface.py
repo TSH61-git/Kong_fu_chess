@@ -1,54 +1,60 @@
 import sys
-from core.board_parser import BoardParser
+from typing import Tuple, List
 from core.game_service import GameService
-from core.exceptions import BoardValidationError
+
 
 class TextInterface:
-    @classmethod
-    def run(cls):
-        input_text = sys.stdin.read().strip()
-        if not input_text: 
-            return
+    def __init__(self, game_service: GameService, command_lines: List[str]) -> None:
+        self._game = game_service
+        self._commands = command_lines
 
-        board_lines = []
+    def run(self) -> None:
+        for cmd in self._commands:
+            self._dispatch(cmd)
+
+    # ------------------------------------------------------------------
+    # Static factory helper — called by the Composition Root BEFORE the
+    # object graph is assembled, so board lines can be parsed first.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def read_sections() -> Tuple[List[str], List[str]]:
+        """
+        Reads stdin once and splits it into (board_lines, command_lines).
+        Returns two empty lists if stdin is empty.
+        """
+        raw = sys.stdin.read().strip()
+        if not raw:
+            return [], []
+
+        board_lines: List[str] = []
+        command_lines: List[str] = []
         in_board = False
-        commands_lines = [] 
 
-        for line in [l.strip() for l in input_text.splitlines()]:
-            if line.startswith("Board:"):
+        for line in (l.strip() for l in raw.splitlines()):
+            if line.startswith('Board:'):
                 in_board = True
-                continue
-            elif line.startswith("Commands:"):
+            elif line.startswith('Commands:'):
                 in_board = False
-                continue 
-            
-            if in_board and line:
+            elif in_board and line:
                 board_lines.append(line)
             elif not in_board and line:
-                commands_lines.append(line)
+                command_lines.append(line)
 
-        try:
-            parsed_matrix = BoardParser.validate_and_parse(board_lines)
-            
-            game = GameService(parsed_matrix)
-            
-            for cmd in commands_lines:
-                parts = cmd.split()
-                if not parts:
-                    continue
-                
-                cmd_type = parts[0]
-                
-                if cmd_type == "click":
-                    x, y = int(parts[1]), int(parts[2])
-                    game.handle_click(x, y)
-                    
-                elif cmd_type == "wait":
-                    ms = int(parts[1])
-                    game.handle_wait(ms)
-                    
-                elif cmd == "print board":
-                    print("\n".join(game.get_board_lines()))
-                    
-        except BoardValidationError as e:
-            print(e)
+        return board_lines, command_lines
+
+    # ------------------------------------------------------------------
+
+    def _dispatch(self, cmd: str) -> None:
+        parts = cmd.split()
+        if not parts:
+            return
+
+        cmd_type = parts[0]
+
+        if cmd_type == 'click':
+            self._game.handle_click(int(parts[1]), int(parts[2]))
+        elif cmd_type == 'wait':
+            self._game.handle_wait(int(parts[1]))
+        elif cmd == 'print board':
+            print('\n'.join(self._game.get_board_lines()))
