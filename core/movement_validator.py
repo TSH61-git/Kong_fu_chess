@@ -24,6 +24,25 @@ class MovementValidator:
         dr = abs(r2 - r1)
         dc = abs(c2 - c1)
 
+        if piece_type == 'P':
+            # קביעת כיוון הצעד המותר בשורות: לבן זז למעלה (-1), שחור זז למטה (1)
+            allowed_row_diff = -1 if piece[0] == 'w' else 1
+            
+            # בדיקה שהרגלי זז בדיוק שורה אחת ובכיוון הנכון
+            if (r2 - r1) != allowed_row_diff:
+                return False
+                
+            # מקרה א': תנועה ישר קדימה (עמודה לא משתנה) -> חייב משבצת ריקה
+            if dc == 0:
+                return target_token == '.'
+                
+            # מקרה ב': תנועה באלכסון (עמודה משתנה ב-1) -> חייב להיות שם כלי אויב
+            elif dc == 1:
+                return target_token != '.'
+                
+            # כל תנועה אחרת הצידה אסורה לרגלי
+            return False
+
         # 2. בדיקת צורת הכלי הבסיסית (Shape)
         shape_valid = False
         if piece_type == 'K':    shape_valid = (max(dr, dc) == 1)
