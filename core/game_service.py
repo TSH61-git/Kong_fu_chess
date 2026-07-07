@@ -62,7 +62,7 @@ class GameService:
         # Attempt move — board matrix is NOT mutated here
         if self._validator.is_valid_move(
             self._board, selected_token, (curr_row, curr_col), (row, col)
-        ):
+        ) and not self._has_opposite_color_in_flight(selected_token[0]):
             dr = abs(row - curr_row)
             dc = abs(col - curr_col)
             arrival = self._clock.now() + max(dr, dc) * 1000
@@ -98,3 +98,7 @@ class GameService:
     def _is_in_flight(self, row: int, col: int) -> bool:
         """True if a piece at (row, col) has been dispatched but not yet arrived."""
         return any(m.from_pos == (row, col) for m in self._pending_moves)
+
+    def _has_opposite_color_in_flight(self, color: str) -> bool:
+        """True if any pending move belongs to the opposite color."""
+        return any(m.piece[0] != color for m in self._pending_moves)
