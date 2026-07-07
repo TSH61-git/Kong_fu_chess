@@ -4,7 +4,6 @@ from typing import List, Tuple, Optional
 from core.interfaces.i_movement_validator import IMovementValidator
 from core.game_clock import GameClock
 
-
 @dataclass
 class _PendingMove:
     piece:        str
@@ -27,19 +26,24 @@ class GameService:
         self._clock = clock
         self._selected_pos: Optional[Tuple[int, int]] = None
         self._pending_moves: List[_PendingMove] = []
+        self._game_over: bool = False
 
     # ------------------------------------------------------------------ #
     # Public interface                                                     #
     # ------------------------------------------------------------------ #
 
     def handle_click(self, x: int, y: int) -> None:
+        # Ignore all inputs if the game has already ended
+        if self._game_over:
+            return
+
         col = x // 100
         row = y // 100
 
         if not (0 <= row < self._rows and 0 <= col < self._cols):
             return
 
-        # Settle any arrivals before evaluating the click
+        # Settle any arrivals before evaluating the current click
         self._flush_pending()
 
         token = self._board[row][col]
@@ -53,24 +57,26 @@ class GameService:
         curr_row, curr_col = self._selected_pos
         selected_token = self._board[curr_row][curr_col]
 
-        # Re-select a friendly piece that is not in-flight
+        # Re-select a friendly piece that is not currently in-flight
         if token != '.' and token[0] == selected_token[0]:
             if not self._is_in_flight(row, col):
                 self._selected_pos = (row, col)
             return
 
-        # Attempt move — board matrix is NOT mutated here
+        # Attempt move dispatching with geometric, cross-color concurrency, and head-on collision guards
         if self._validator.is_valid_move(
             self._board, selected_token, (curr_row, curr_col), (row, col)
         ) and not self._has_opposite_color_in_flight(selected_token[0]) \
           and not self._has_head_on_collision((curr_row, curr_col), (row, col)):
+            
             dr = abs(row - curr_row)
             dc = abs(col - curr_col)
             arrival = self._clock.now() + max(dr, dc) * 1000
+            
             self._pending_moves.append(
                 _PendingMove(selected_token, (curr_row, curr_col), (row, col), arrival)
             )
-            # Piece remains visible at source on the matrix until arrival_time
+            # Note: The piece remains visible at its source cell on the matrix until arrival_time
 
         self._selected_pos = None
 
@@ -89,12 +95,33 @@ class GameService:
     def _flush_pending(self) -> None:
         """Atomically settle every move whose arrival_time <= clock.now()."""
         arrived = [m for m in self._pending_moves if self._clock.now() >= m.arrival_time]
+        
+        # Sort arrived moves chronologically to guarantee correct arrival order resolution
+        arrived.sort(key=lambda x: x.arrival_time)
+        
         for move in arrived:
+            if self._game_over:
+                break
+
             r1, c1 = move.from_pos
             r2, c2 = move.to_pos
-            self._board[r2][c2] = move.piece  # land at destination
-            self._board[r1][c1] = '.'          # clear source
-            self._pending_moves.remove(move)
+            
+            # Check if the target landing square contains an enemy King
+            if self._board[r2][c2] in ('wK', 'bK'):
+                self._game_over = True
+                self._board[r2][c2] = move.piece  # Execute the winning capture immediately
+                self._board[r1][c1] = '.'         # Clear the source cell
+                break  # Exit loop immediately to prevent processing remaining moves after Game Over
+                
+            # Process a standard non-king capture or movement
+            self._board[r2][c2] = move.piece  
+            self._board[r1][c1] = '.'          
+            if move in self._pending_moves:
+                self._pending_moves.remove(move)
+
+        # Safely discard all remaining in-flight moves after the loop terminates due to Game Over
+        if self._game_over:
+            self._pending_moves.clear()
 
     def _is_in_flight(self, row: int, col: int) -> bool:
         """True if a piece at (row, col) has been dispatched but not yet arrived."""
