@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 from core.interfaces.i_movement_validator import IMovementValidator
 from core.game_clock import GameClock
-
+from core.constants import KING_TOKENS, EMPTY_CELL, MS_PER_CELL_TRAVEL
 @dataclass
 class _PendingMove:
     piece:        str
@@ -50,7 +50,7 @@ class GameService:
 
         if self._selected_pos is None:
             # Only select a piece that exists on the matrix and is not in-flight
-            if token != '.' and not self._is_in_flight(row, col):
+            if token != EMPTY_CELL and not self._is_in_flight(row, col):
                 self._selected_pos = (row, col)
             return
 
@@ -58,7 +58,7 @@ class GameService:
         selected_token = self._board[curr_row][curr_col]
 
         # Re-select a friendly piece that is not currently in-flight
-        if token != '.' and token[0] == selected_token[0]:
+        if token != EMPTY_CELL and token[0] == selected_token[0]:
             if not self._is_in_flight(row, col):
                 self._selected_pos = (row, col)
             return
@@ -71,7 +71,7 @@ class GameService:
             
             dr = abs(row - curr_row)
             dc = abs(col - curr_col)
-            arrival = self._clock.now() + max(dr, dc) * 1000
+            arrival = self._clock.now() + max(dr, dc) * MS_PER_CELL_TRAVEL
             
             self._pending_moves.append(
                 _PendingMove(selected_token, (curr_row, curr_col), (row, col), arrival)
@@ -107,15 +107,15 @@ class GameService:
             r2, c2 = move.to_pos
             
             # Check if the target landing square contains an enemy King
-            if self._board[r2][c2] in ('wK', 'bK'):
+            if self._board[r2][c2] in KING_TOKENS:
                 self._game_over = True
                 self._board[r2][c2] = move.piece  # Execute the winning capture immediately
-                self._board[r1][c1] = '.'         # Clear the source cell
+                self._board[r1][c1] = EMPTY_CELL       # Clear the source cell
                 break  # Exit loop immediately to prevent processing remaining moves after Game Over
                 
             # Process a standard non-king capture or movement
             self._board[r2][c2] = move.piece  
-            self._board[r1][c1] = '.'          
+            self._board[r1][c1] = EMPTY_CELL       
             if move in self._pending_moves:
                 self._pending_moves.remove(move)
 

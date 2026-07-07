@@ -1,3 +1,5 @@
+# Git Repository URL: https://github.com/TSH61-git/Kong_fu_chess
+
 from ui.text_interface import TextInterface
 from core.board_parser import BoardParser
 from core.strategies import build_default_registry
