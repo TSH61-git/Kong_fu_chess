@@ -62,7 +62,8 @@ class GameService:
         # Attempt move — board matrix is NOT mutated here
         if self._validator.is_valid_move(
             self._board, selected_token, (curr_row, curr_col), (row, col)
-        ) and not self._has_opposite_color_in_flight(selected_token[0]):
+        ) and not self._has_opposite_color_in_flight(selected_token[0]) \
+          and not self._has_head_on_collision((curr_row, curr_col), (row, col)):
             dr = abs(row - curr_row)
             dc = abs(col - curr_col)
             arrival = self._clock.now() + max(dr, dc) * 1000
@@ -102,3 +103,12 @@ class GameService:
     def _has_opposite_color_in_flight(self, color: str) -> bool:
         """True if any pending move belongs to the opposite color."""
         return any(m.piece[0] != color for m in self._pending_moves)
+
+    def _has_head_on_collision(
+        self, from_pos: Tuple[int, int], to_pos: Tuple[int, int]
+    ) -> bool:
+        """True if an existing pending move is travelling the exact reverse route."""
+        return any(
+            m.from_pos == to_pos and m.to_pos == from_pos
+            for m in self._pending_moves
+        )
