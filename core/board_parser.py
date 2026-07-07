@@ -2,7 +2,7 @@ from typing import List
 from core.exceptions import UnknownTokenError, RowWidthMismatchError
 
 class BoardParser:
-    VALID_TOKENS = {'wK', 'bK', 'wR', 'bR', 'wQ', 'bQ', 'wN', 'bN', 'wP', 'bP', '.'}
+    VALID_TOKENS = {'wK', 'bK', 'wR', 'bR', 'wB', 'bB', 'wQ', 'bQ', 'wN', 'bN', 'wP', 'bP', '.'}
 
     @classmethod
     def validate_and_parse(cls, board_lines: List[str]) -> List[List[str]]:
@@ -17,13 +17,11 @@ class BoardParser:
             if not tokens: 
                 continue
             
-            # טסט 5: בדיקת אחידות אורך השורות
             if expected_width is None: 
                 expected_width = len(tokens)
             elif len(tokens) != expected_width: 
                 raise RowWidthMismatchError()
             
-            # טסט 4: בדיקת טוקנים חוקיים
             if any(t not in cls.VALID_TOKENS for t in tokens): 
                 raise UnknownTokenError()
             
