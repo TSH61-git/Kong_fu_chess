@@ -1,35 +1,54 @@
+from typing import List, Tuple
+
 class MovementValidator:
     @classmethod
-    def is_valid_move(cls, piece_type: str, from_pos: tuple, to_pos: tuple) -> bool:
+    def is_valid_move(cls, board: List[List[str]], piece: str, from_pos: Tuple[int, int], to_pos: Tuple[int, int]) -> bool:
         """
-        בודק האם מהלך מחוקק לצורת הכלי.
-        piece_type: סוג הכלי בלבד (K, R, B, Q, N) ללא הצבע.
-        from_pos: (row, col) של נקודת המוצא
-        to_pos: (row, col) של נקודת היעד
+        מבצע בדיקה מקיפה: צורת כלי, חוסמים במסלול, ואכילה חוקית ביעד.
+        piece: הטוקן המלא של הכלי הזז (למשל 'wR', 'bB')
         """
         r1, c1 = from_pos
         r2, c2 = to_pos
         
-        # אם השחקן לחץ על אותה משבצת, זה לא מהלך תנועה
         if r1 == r2 and c1 == c2:
             return True
             
+        target_token = board[r2][c2]
+        
+        # 1. בדיקת תא היעד : מניעת אכילת כלי מאותו צבע
+        if target_token != '.' and target_token[0] == piece[0]:
+            return False
+            
+        # חילוץ סוג הכלי בלבד
+        piece_type = piece[1]
         dr = abs(r2 - r1)
         dc = abs(c2 - c1)
 
-        if piece_type == 'K':    # מלך: משבצת אחת לכל כיוון
-            return max(dr, dc) == 1
+        # 2. בדיקת צורת הכלי הבסיסית (Shape)
+        shape_valid = False
+        if piece_type == 'K':    shape_valid = (max(dr, dc) == 1)
+        elif piece_type == 'R':  shape_valid = (dr == 0 or dc == 0)
+        elif piece_type == 'B':  shape_valid = (dr == dc)
+        elif piece_type == 'Q':  shape_valid = (dr == 0 or dc == 0 or dr == dc)
+        elif piece_type == 'N':  shape_valid = ((dr == 1 and dc == 2) or (dr == 2 and dc == 1))
+        
+        if not shape_valid:
+            return False
+
+        # 3. בדיקת מסלול וחוסמים : רלוונטי רק לצריח, רץ ומלכה
+        if piece_type in ('R', 'B', 'Q'):
+            # חישוב כיוון הצעד (-1, 0, או 1)
+            step_r = 1 if r2 > r1 else (-1 if r2 < r1 else 0)
+            step_c = 1 if c2 > c1 else (-1 if c2 < c1 else 0)
             
-        elif piece_type == 'R':  # צריח: רק בשורה או רק בעמודה
-            return dr == 0 or dc == 0
+            curr_r = r1 + step_r
+            curr_c = c1 + step_c
             
-        elif piece_type == 'B':  # רץ: באלכסון בלבד
-            return dr == dc
-            
-        elif piece_type == 'Q':  # מלכה: שילוב של צריח ורץ
-            return dr == 0 or dc == 0 or dr == dc
-            
-        elif piece_type == 'N':  # פרש: תנועת L (1 ו-2 או 2 ו-1)
-            return (dr == 1 and dc == 2) or (dr == 2 and dc == 1)
-            
-        return False
+            # לולאה שצועדת בתוך המסלול עד שהיא מגיעה אל משבצת היעד
+            while (curr_r, curr_c) != (r2, c2):
+                if board[curr_r][curr_c] != '.':
+                    return False  # נמצא חוסם בדרך!
+                curr_r += step_r
+                curr_c += step_c
+
+        return True

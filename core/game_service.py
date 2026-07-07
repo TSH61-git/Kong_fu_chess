@@ -29,9 +29,7 @@ class GameService:
         if token != '.' and token[0] == selected_token[0]:
             self.selected_pos = (row, col)
         else:
-            piece_type = selected_token[1]
-            
-            if MovementValidator.is_valid_move(piece_type, (curr_row, curr_col), (row, col)):
+            if MovementValidator.is_valid_move(self.board, selected_token, (curr_row, curr_col), (row, col)):
                 self.board[row][col] = selected_token
                 self.board[curr_row][curr_col] = '.'
             
