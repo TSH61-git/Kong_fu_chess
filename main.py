@@ -3,6 +3,7 @@ from core.board_parser import BoardParser
 from core.strategies import build_default_registry
 from core.movement_validator import MovementValidator
 from core.game_service import GameService
+from core.game_clock import GameClock
 from core.exceptions import BoardValidationError
 
 
@@ -17,7 +18,8 @@ def main() -> None:
 
     registry  = build_default_registry()
     validator = MovementValidator(registry)
-    game      = GameService(board_matrix, validator)
+    clock     = GameClock()
+    game      = GameService(board_matrix, validator, clock)
     interface = TextInterface(game, command_lines)
 
     interface.run()
