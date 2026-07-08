@@ -1,9 +1,13 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from core.interfaces.i_movement_validator import IMovementValidator
+from core.interfaces.i_movement_strategy import IMovementStrategy
 from core.game_clock import GameClock
-from core.constants import KING_TOKENS, EMPTY_CELL, MS_PER_CELL_TRAVEL
+from core.constants import (
+    KING_TOKENS, EMPTY_CELL, MS_PER_CELL_TRAVEL,
+    WHITE_COLOR, CELL_SIZE_PX,
+)
 @dataclass
 class _PendingMove:
     piece:        str
@@ -18,12 +22,14 @@ class GameService:
         board: List[List[str]],
         validator: IMovementValidator,
         clock: GameClock,
+        registry: Optional[Dict[str, IMovementStrategy]] = None,
     ) -> None:
-        self._board = board
+        self._board = [row[:] for row in board]
         self._rows = len(board)
         self._cols = len(board[0]) if self._rows > 0 else 0
         self._validator = validator
         self._clock = clock
+        self._registry = registry
         self._selected_pos: Optional[Tuple[int, int]] = None
         self._pending_moves: List[_PendingMove] = []
         self._game_over: bool = False
@@ -37,8 +43,8 @@ class GameService:
         if self._game_over:
             return
 
-        col = x // 100
-        row = y // 100
+        col = x // CELL_SIZE_PX
+        row = y // CELL_SIZE_PX
 
         if not (0 <= row < self._rows and 0 <= col < self._cols):
             return
@@ -58,7 +64,7 @@ class GameService:
         selected_token = self._board[curr_row][curr_col]
 
         # Re-select a friendly piece that is not currently in-flight
-        if token != EMPTY_CELL and token[0] == selected_token[0]:
+        if token != EMPTY_CELL and token[0] == selected_token[0]:  # same color
             if not self._is_in_flight(row, col):
                 self._selected_pos = (row, col)
             return
@@ -85,7 +91,6 @@ class GameService:
         self._flush_pending()
 
     def get_board_lines(self) -> List[str]:
-        self._flush_pending()
         return [' '.join(row) for row in self._board]
 
     # ------------------------------------------------------------------ #
@@ -93,35 +98,40 @@ class GameService:
     # ------------------------------------------------------------------ #
 
     def _flush_pending(self) -> None:
-        """Atomically settle every move whose arrival_time <= clock.now()."""
+        """Settle every move whose arrival_time <= clock.now()."""
         arrived = [m for m in self._pending_moves if self._clock.now() >= m.arrival_time]
-        
-        # Sort arrived moves chronologically to guarantee correct arrival order resolution
-        arrived.sort(key=lambda x: x.arrival_time)
-        
+        arrived.sort(key=lambda m: m.arrival_time)
+
         for move in arrived:
             if self._game_over:
                 break
+            self._apply_single_move(move)
 
-            r1, c1 = move.from_pos
-            r2, c2 = move.to_pos
-            
-            # Check if the target landing square contains an enemy King
-            if self._board[r2][c2] in KING_TOKENS:
-                self._game_over = True
-                self._board[r2][c2] = move.piece  # Execute the winning capture immediately
-                self._board[r1][c1] = EMPTY_CELL       # Clear the source cell
-                break  # Exit loop immediately to prevent processing remaining moves after Game Over
-                
-            # Process a standard non-king capture or movement
-            self._board[r2][c2] = move.piece  
-            self._board[r1][c1] = EMPTY_CELL       
-            if move in self._pending_moves:
-                self._pending_moves.remove(move)
-
-        # Safely discard all remaining in-flight moves after the loop terminates due to Game Over
         if self._game_over:
             self._pending_moves.clear()
+
+    def _apply_single_move(self, move: _PendingMove) -> None:
+        """Mutate the board for one arrived move and handle game-over / on_land hooks."""
+        r1, c1 = move.from_pos
+        r2, c2 = move.to_pos
+
+        if self._board[r2][c2] in KING_TOKENS:
+            self._game_over = True
+            self._board[r2][c2] = move.piece
+            self._board[r1][c1] = EMPTY_CELL
+            return
+
+        self._board[r1][c1] = EMPTY_CELL
+
+        # Delegate landing transformation to the strategy (e.g. pawn promotion)
+        landed = move.piece
+        if self._registry is not None:
+            strategy = self._registry.get(move.piece[1])
+            if strategy is not None:
+                landed = strategy.on_land(self._board, move.piece, (r2, c2))
+
+        self._board[r2][c2] = landed
+        self._pending_moves.remove(move)
 
     def _is_in_flight(self, row: int, col: int) -> bool:
         """True if a piece at (row, col) has been dispatched but not yet arrived."""

@@ -12,16 +12,26 @@ from core.exceptions import BoardValidationError
 def main() -> None:
     board_lines, command_lines = TextInterface.read_sections()
 
+    registry  = build_default_registry(len(board_lines))  # rows not yet parsed
+
+    # Build allowed tokens dynamically from registry: both colors × each piece type + empty
+    from core.constants import WHITE_COLOR, BLACK_COLOR, EMPTY_CELL
+    allowed = {
+        color + ptype
+        for ptype in registry
+        for color in (WHITE_COLOR, BLACK_COLOR)
+    } | {EMPTY_CELL}
+
     try:
-        board_matrix = BoardParser.validate_and_parse(board_lines)
+        board_matrix = BoardParser.validate_and_parse(board_lines, allowed)
     except BoardValidationError as e:
         print(e)
         return
 
-    registry  = build_default_registry()
+    registry  = build_default_registry(len(board_matrix))
     validator = MovementValidator(registry)
     clock     = GameClock()
-    game      = GameService(board_matrix, validator, clock)
+    game      = GameService(board_matrix, validator, clock, registry)
     interface = TextInterface(game, command_lines)
 
     interface.run()
