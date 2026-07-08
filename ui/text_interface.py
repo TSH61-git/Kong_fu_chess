@@ -56,5 +56,7 @@ class TextInterface:
             self._game.handle_click(int(parts[1]), int(parts[2]))
         elif cmd_type == 'wait':
             self._game.handle_wait(int(parts[1]))
+        elif cmd_type == 'jump':
+            self._game.handle_jump(int(parts[1]), int(parts[2]))
         elif cmd == 'print board':
             print('\n'.join(self._game.get_board_lines()))
