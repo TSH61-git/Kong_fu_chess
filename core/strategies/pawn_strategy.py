@@ -60,17 +60,3 @@ class PawnStrategy(IMovementStrategy):
         if piece == BLACK_PAWN and row == self._total_rows - 1:
             return BLACK_QUEEN
         return piece
-
-    # Backward-compatible alias kept for existing tests
-    def is_valid_pawn_move(
-        self, color: str, r1: int, r2: int, dc: int, target_token: str
-    ) -> bool:
-        direction = -1 if color == WHITE_COLOR else 1
-        row_diff = r2 - r1
-        if row_diff == direction:
-            if dc == 0:
-                return target_token == EMPTY_CELL
-            if dc == 1:
-                return target_token != EMPTY_CELL
-            return False
-        return False

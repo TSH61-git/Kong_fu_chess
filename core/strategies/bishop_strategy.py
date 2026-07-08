@@ -4,9 +4,6 @@ from core.constants import EMPTY_CELL
 
 
 class BishopStrategy(IMovementStrategy):
-    def is_shape_valid(self, dr: int, dc: int) -> bool:
-        return dr == dc
-
     def is_valid_move(
         self,
         board: List[List[str]],
@@ -17,7 +14,7 @@ class BishopStrategy(IMovementStrategy):
         r1, c1 = from_pos
         r2, c2 = to_pos
         dr, dc = abs(r2 - r1), abs(c2 - c1)
-        if not self.is_shape_valid(dr, dc):
+        if dr != dc:
             return False
         step_r = 1 if r2 > r1 else -1
         step_c = 1 if c2 > c1 else -1
