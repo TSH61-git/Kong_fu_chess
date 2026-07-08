@@ -107,6 +107,9 @@ class GameService:
                 break
             self._apply_single_move(move)
 
+        # ניקוי בטוח לאחר סיום הלולאה כדי למנוע באגים של שינוי רשימה בזמן ריצה
+        self._pending_moves = [m for m in self._pending_moves if m not in arrived]
+
         if self._game_over:
             self._pending_moves.clear()
 
@@ -131,7 +134,6 @@ class GameService:
                 landed = strategy.on_land(self._board, move.piece, (r2, c2))
 
         self._board[r2][c2] = landed
-        self._pending_moves.remove(move)
 
     def _is_in_flight(self, row: int, col: int) -> bool:
         """True if a piece at (row, col) has been dispatched but not yet arrived."""

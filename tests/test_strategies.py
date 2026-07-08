@@ -152,7 +152,7 @@ class TestQueenStrategy:
 
 class TestPawnStrategy:
     def setup_method(self):
-        self.s = PawnStrategy(total_rows=8)
+        self.s = PawnStrategy()
 
     def test_white_forward_single_step(self):
         b = _board('wP', 6, 0)
@@ -203,7 +203,7 @@ class TestPawnStrategy:
 
 class TestPawnOnLand:
     def setup_method(self):
-        self.s = PawnStrategy(total_rows=8)
+        self.s = PawnStrategy()
 
     def test_white_promotes_on_row_0(self):
         b = _board('wP', 0, 3)
