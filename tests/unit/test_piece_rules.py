@@ -1,5 +1,5 @@
 """
-Unit tests for rules/piece_rules.py — PieceRules geometry layer.
+Unit tests for rules/movement_rules.py — Movement geometry layer.
 
 Every test operates on a Board instance built via text_io.BoardParser.
 Tests are grouped by piece type and cover:
@@ -15,7 +15,7 @@ All tests are written BEFORE the implementation exists (TDD red phase).
 import pytest
 from text_io.board_parser import BoardParser
 from model.position import Position
-from rules.piece_rules import legal_destinations
+from rules.movement_rules import legal_destinations
 
 
 # ------------------------------------------------------------------ #

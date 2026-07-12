@@ -30,7 +30,7 @@ Design notes
 ------------
 - Completely read-only relative to Board: no set() calls are made.
 - Stateless: RuleEngine holds no mutable state between calls.
-- Depends only on model/ and rules/piece_rules; no game or timing logic.
+- Depends only on model/ and rules/movement_rules; no game or timing logic.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ from dataclasses import dataclass
 
 from model.board import Board
 from model.position import Position
-from rules.piece_rules import legal_destinations
+from rules.movement_rules import legal_destinations
 
 _EMPTY = "."
 

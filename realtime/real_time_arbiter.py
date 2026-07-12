@@ -7,6 +7,7 @@ from model.board import Board
 from model.piece import Piece, PieceState
 from model.position import Position
 from realtime.motion import Motion
+from rules.promotion_rules import get_promoted_token
 
 CELL_SIZE = 100
 PIECE_SPEED = 100
@@ -89,7 +90,15 @@ class RealTimeArbiter:
             self._resolve_arrival()
 
     def _resolve_arrival(self) -> None:
-        """Apply the arrival transition atomically to the board."""
+        """Apply the arrival transition atomically to the board.
+        
+        After a piece arrives at its destination:
+          1. Clear the source cell.
+          2. Check if the destination held a King (capture detection).
+          3. Place the piece at the destination.
+          4. Check for pawn promotion and apply it if needed.
+          5. Mark the active piece as idle and clear the active motion.
+        """
         motion = self._active_motion
         if motion is None:
             return
@@ -100,10 +109,43 @@ class RealTimeArbiter:
             self._game_engine.notify_king_captured()
         self._board.set(motion.destination, motion.piece)
 
+        # Check for promotion and apply atomically
+        self._apply_promotion_if_needed(motion.destination, motion.piece)
+
         if self._active_piece is not None:
             self._active_piece.state = PieceState.IDLE
 
         self._active_motion = None
+
+    def _apply_promotion_if_needed(self, destination: Position, piece_token: str) -> None:
+        """Check if a piece should be promoted upon arrival and apply the transformation.
+        
+        Extraction flow:
+          - Piece token format: two characters, e.g. 'wP', 'bP', 'wK'.
+          - Color (first character): 'w' or 'b'.
+          - Piece type (second character): 'P', 'R', 'B', 'N', 'Q', 'K'.
+        
+        If the piece type transforms (e.g. Pawn to Queen), atomically update
+        the destination cell with the new token.
+        
+        Args:
+            destination: The arrival position.
+            piece_token: The two-character token string of the moving piece.
+        """
+        if len(piece_token) < 2:
+            return
+
+        color = piece_token[0]
+        piece_type = piece_token[1]
+
+        promoted_type = get_promoted_token(
+            piece_type, destination.row, self._board.rows, color
+        )
+
+        # Apply promotion if the piece type changed
+        if promoted_type != piece_type:
+            promoted_token = color + promoted_type
+            self._board.set(destination, promoted_token)
 
     def _calculate_duration_ms(self, source: Position, destination: Position) -> int:
         """Return the travel time in milliseconds for this motion."""
