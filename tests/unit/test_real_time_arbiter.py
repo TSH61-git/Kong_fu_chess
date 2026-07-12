@@ -43,3 +43,15 @@ class TestRealTimeArbiter:
         arbiter.advance_time(2000)
 
         game_engine.notify_king_captured.assert_called_once_with()
+
+    def test_advance_time_resolves_jump_after_horizontal_move_and_overwrites_destination(self):
+        board = BoardParser.parse(["wK . bR"])
+        game_engine = MagicMock()
+        arbiter = RealTimeArbiter(board=board, game_engine=game_engine)
+        arbiter.start_motion("wK", Position(0, 0), Position(0, 0), duration_ms=1000)
+        arbiter.start_motion("bR", Position(0, 2), Position(0, 0), duration_ms=1000)
+
+        arbiter.advance_time(1000)
+
+        assert board.get(Position(0, 0)) == "wK"
+        assert board.get(Position(0, 2)) == "."

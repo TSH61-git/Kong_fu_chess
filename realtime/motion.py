@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from model.position import Position
 
 
-@dataclass
+@dataclass(eq=False)
 class Motion:
     """Represents one active movement in the real-time arbiter.
 

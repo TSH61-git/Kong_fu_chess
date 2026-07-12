@@ -174,27 +174,27 @@ class TestGuardGameOver:
 # ------------------------------------------------------------------ #
 
 class TestGuardMotionInProgress:
-    def test_returns_motion_in_progress_reason(self):
+    def test_allows_new_motion_when_another_is_active(self):
         engine, _ = _engine(["wR . ."], has_active=True)
         result = engine.request_move(Position(0, 0), Position(0, 2))
-        assert result.is_accepted is False
-        assert result.reason == "motion_in_progress"
+        assert result.is_accepted is True
+        assert result.reason == "ok"
 
-    def test_rule_engine_not_consulted_when_motion_active(self):
+    def test_rule_engine_is_still_consulted_when_motion_active(self):
         board = _board(["wR . ."])
         mock_rule_engine = MagicMock()
         arbiter = _mock_arbiter(has_active=True)
         engine = GameEngine(board=board, rule_engine=mock_rule_engine, arbiter=arbiter)
         engine.request_move(Position(0, 0), Position(0, 2))
-        mock_rule_engine.validate_move.assert_not_called()
+        mock_rule_engine.validate_move.assert_called_once()
 
-    def test_arbiter_start_motion_not_called_when_motion_active(self):
+    def test_arbiter_start_motion_is_called_when_motion_active(self):
         engine, arbiter = _engine(["wR . ."], has_active=True)
         engine.request_move(Position(0, 0), Position(0, 2))
-        arbiter.start_motion.assert_not_called()
+        arbiter.start_motion.assert_called_once()
 
-    def test_game_over_takes_priority_over_motion_in_progress(self):
-        """game_over guard must fire before has_active_motion is even checked."""
+    def test_game_over_takes_priority_over_active_motion(self):
+        """game_over guard must fire before any move request is accepted."""
         board = _board(["wR . ."])
         mock_rule_engine = MagicMock()
         arbiter = _mock_arbiter(has_active=True)
@@ -202,7 +202,6 @@ class TestGuardMotionInProgress:
         engine.notify_king_captured()
         result = engine.request_move(Position(0, 0), Position(0, 2))
         assert result.reason == "game_over"
-        arbiter.has_active_motion.assert_not_called()
 
 
 # ------------------------------------------------------------------ #

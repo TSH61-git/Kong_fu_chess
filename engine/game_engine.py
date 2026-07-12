@@ -127,11 +127,15 @@ class IRealTimeArbiter(Protocol):
 
     GameEngine depends on this Protocol rather than the concrete
     RealTimeArbiter to prevent a forward dependency.  Any object
-    exposing these three methods satisfies the protocol.
+    exposing the required methods satisfies the protocol.
     """
 
     def has_active_motion(self) -> bool:
         """Return True if any piece is currently in transit."""
+        ...
+
+    def get_active_motions(self):
+        """Return a snapshot of the currently active motions."""
         ...
 
     def start_motion(
@@ -193,6 +197,78 @@ class GameEngine:
     # Public API                                                           #
     # ------------------------------------------------------------------ #
 
+    def _get_active_motions(self):
+        """Return active motions from the arbiter when it exposes them."""
+        arbiter_type = getattr(type(self._arbiter), "get_active_motions", None)
+        if callable(arbiter_type):
+            motions = self._arbiter.get_active_motions()
+            if motions is None:
+                return []
+            return list(motions)
+        return []
+
+    def _is_source_locked(self, source: Position) -> bool:
+        """Return True when the requested source is already in flight."""
+        return any(
+            getattr(motion, "source", None) == source
+            for motion in self._get_active_motions()
+        )
+
+    def _is_linear_move(self, source: Position, destination: Position) -> bool:
+        """Return True for standard row/column/diagonal moves."""
+        if source == destination:
+            return False
+        return (
+            source.row == destination.row
+            or source.col == destination.col
+            or abs(source.row - destination.row) == abs(source.col - destination.col)
+        )
+
+    def _path_intersects(self, source: Position, destination: Position) -> bool:
+        """Return True when the requested linear route overlaps an active linear route."""
+        if not self._is_linear_move(source, destination):
+            return False
+
+        for motion in self._get_active_motions():
+            other_source = getattr(motion, "source", None)
+            other_destination = getattr(motion, "destination", None)
+            if other_source is None or other_destination is None:
+                continue
+            if not self._is_linear_move(other_source, other_destination):
+                continue
+
+            if self._segments_overlap(source, destination, other_source, other_destination):
+                return True
+        return False
+
+    def _segments_overlap(
+        self,
+        source_a: Position,
+        destination_a: Position,
+        source_b: Position,
+        destination_b: Position,
+    ) -> bool:
+        """Return True when two linear segments share at least one grid cell."""
+        path_a = self._linear_path(source_a, destination_a)
+        path_b = self._linear_path(source_b, destination_b)
+        return any(position in path_b for position in path_a)
+
+    def _linear_path(self, source: Position, destination: Position) -> list[Position]:
+        """Return all cells travelled by a linear move, including endpoints."""
+        if source == destination:
+            return [source]
+
+        delta_row = 0 if source.row == destination.row else (1 if destination.row > source.row else -1)
+        delta_col = 0 if source.col == destination.col else (1 if destination.col > source.col else -1)
+
+        path: list[Position] = []
+        current = source
+        while current != destination:
+            path.append(current)
+            current = Position(current.row + delta_row, current.col + delta_col)
+        path.append(destination)
+        return path
+
     def request_move(
         self,
         source: Position,
@@ -217,18 +293,22 @@ class GameEngine:
         if self._game_over:
             return MoveResult(is_accepted=False, reason=_GAME_OVER)
 
-        # Guard 2 — another piece is already in transit
-        if self._arbiter.has_active_motion():
+        # Guard 2 — same piece already in motion
+        if self._is_source_locked(source):
             return MoveResult(is_accepted=False, reason=_MOTION_IN_PROGRESS)
 
-        # Guard 3 — chess rule validation
+        # Guard 3 — shared linear route already in use
+        if self._path_intersects(source, destination):
+            return MoveResult(is_accepted=False, reason=_MOTION_IN_PROGRESS)
+
+        # Guard 4 — chess rule validation
         validation = self._rule_engine.validate_move(
             self._board, source, destination
         )
         if not validation.is_valid:
             return MoveResult(is_accepted=False, reason=validation.reason)
 
-        # Guard 4 — all clear: read piece token and start motion
+        # Guard 5 — all clear: read piece token and start motion
         piece = self._board.get(source)
         self._arbiter.start_motion(
             piece=piece,
@@ -251,7 +331,7 @@ class GameEngine:
         if self._game_over:
             return MoveResult(is_accepted=False, reason=_GAME_OVER)
 
-        if self._arbiter.has_active_motion():
+        if self._is_source_locked(position):
             return MoveResult(is_accepted=False, reason=_MOTION_IN_PROGRESS)
 
         if self._board.get(position) == ".":
