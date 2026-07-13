@@ -15,7 +15,7 @@ def _is_linear_move(source: Position, destination: Position) -> bool:
     )
 
 
-def _linear_path(source: Position, destination: Position) -> list[Position]:
+def linear_path(source: Position, destination: Position) -> list[Position]:
     """Return all cells travelled by a linear move, including endpoints."""
     if source == destination:
         return [source]
@@ -32,6 +32,9 @@ def _linear_path(source: Position, destination: Position) -> list[Position]:
     return path
 
 
+_linear_path = linear_path
+
+
 def _segments_overlap(
     source_a: Position,
     destination_a: Position,
@@ -39,8 +42,8 @@ def _segments_overlap(
     destination_b: Position,
 ) -> bool:
     """Return True when two linear segments share at least one grid cell."""
-    path_a = _linear_path(source_a, destination_a)
-    path_b = _linear_path(source_b, destination_b)
+    path_a = linear_path(source_a, destination_a)
+    path_b = linear_path(source_b, destination_b)
     return any(position in path_b for position in path_a)
 
 

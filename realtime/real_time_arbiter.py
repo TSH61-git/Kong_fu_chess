@@ -7,7 +7,9 @@ from model.board import Board
 from model.piece import Piece, PieceState
 from model.position import Position
 from realtime.motion import Motion
+from rules.movement_rules import legal_destinations
 from rules.promotion_rules import get_promoted_token
+from rules.route_rules import linear_path
 
 CELL_SIZE = 100
 PIECE_SPEED = 100
@@ -91,9 +93,13 @@ class RealTimeArbiter:
         if not self._active_motions or ms <= 0:
             return
 
+        for motion in list(self._active_motions):
+            motion.elapsed_ms += ms
+
+        self._resolve_mid_route_collisions()
+
         completed: list[tuple[int, int, Motion]] = []
         for index, motion in enumerate(self._active_motions):
-            motion.elapsed_ms += ms
             if motion.elapsed_ms >= motion.duration_ms:
                 priority = 0 if motion.source != motion.destination else 1
                 completed.append((priority, index, motion))
@@ -106,6 +112,126 @@ class RealTimeArbiter:
             if motion in self._active_motions:
                 self._active_motions.remove(motion)
                 self._resolve_arrival(motion)
+
+    # ------------------------------------------------------------------ #
+    # Mid-route collision                                                  #
+    # ------------------------------------------------------------------ #
+
+    def _current_cell(self, motion: Motion) -> Position:
+        """Return the logical grid cell the motion occupies at its current elapsed_ms.
+
+        For in-place jumps (source == destination) the cell is always the source.
+        For linear moves, map the elapsed ratio to the path index.
+        """
+        if motion.source == motion.destination or motion.duration_ms == 0:
+            return motion.source
+
+        path = linear_path(motion.source, motion.destination)
+        if len(path) <= 1:
+            return motion.source
+
+        ratio = min(motion.elapsed_ms / motion.duration_ms, 1.0)
+        index = int(ratio * (len(path) - 1))
+        return path[index]
+
+    def _cancel_motion(self, motion: Motion, land_at: Position) -> None:
+        """Remove motion from active tracking and place the piece at land_at."""
+        if motion in self._active_motions:
+            self._active_motions.remove(motion)
+        self._board.set(motion.source, ".")
+        self._board.set(land_at, motion.piece)
+        piece = self._motion_pieces.pop(motion, None)
+        if piece is not None:
+            piece.state = PieceState.IDLE
+
+    def _resolve_mid_route_collisions(self) -> None:
+        """Detect and resolve mid-route collisions between all active motion pairs.
+
+        Enemy collision: the piece that arrived at the shared cell later captures
+        the one that arrived earlier — the earlier motion is cancelled at that cell.
+
+        Friendly collision: the later-arriving piece is stopped at the last legal
+        cell before the collision point. If no legal intermediate stop exists the
+        motion is reverted to its source.
+        """
+        motions = list(self._active_motions)
+        to_cancel: dict[Motion, Position] = {}
+
+        for i in range(len(motions)):
+            for j in range(i + 1, len(motions)):
+                a, b = motions[i], motions[j]
+                if a in to_cancel or b in to_cancel:
+                    continue
+
+                cell_a = self._current_cell(a)
+                cell_b = self._current_cell(b)
+
+                if cell_a != cell_b:
+                    continue
+
+                color_a = a.piece[0] if len(a.piece) >= 1 else ""
+                color_b = b.piece[0] if len(b.piece) >= 1 else ""
+
+                # In-place jumps are treated as already-settled on their cell,
+                # so a linear mover arriving at the same cell is always "later".
+                a_is_jump = a.source == a.destination
+                b_is_jump = b.source == b.destination
+                if a_is_jump and not b_is_jump:
+                    later, earlier = b, a
+                elif b_is_jump and not a_is_jump:
+                    later, earlier = a, b
+                else:
+                    ratio_a = a.elapsed_ms / a.duration_ms if a.duration_ms > 0 else 1.0
+                    ratio_b = b.elapsed_ms / b.duration_ms if b.duration_ms > 0 else 1.0
+                    later, earlier = (b, a) if ratio_b >= ratio_a else (a, b)
+
+                if color_a != color_b:
+                    # Enemy: later piece captures earlier.
+                    # Special case: if the earlier piece is a stationary jump, it holds
+                    # its cell — the incoming linear piece is stopped one cell before it.
+                    if earlier.source == earlier.destination:
+                        # Jump holds the cell; stop the linear piece one step before.
+                        path = linear_path(later.source, later.destination)
+                        stop_cell = self._last_legal_stop_before(later, path, cell_a)
+                        to_cancel[later] = stop_cell
+                    else:
+                        # Normal case: cancel the earlier motion at the collision cell.
+                        to_cancel[earlier] = cell_a
+                else:
+                    # Friendly: stop the later piece before the collision cell
+                    path = linear_path(later.source, later.destination)
+                    stop_cell = self._last_legal_stop_before(later, path, cell_a)
+                    to_cancel[later] = stop_cell
+
+        for motion, land_at in to_cancel.items():
+            if motion in self._active_motions:
+                self._cancel_motion(motion, land_at)
+
+    def _last_legal_stop_before(
+        self, motion: Motion, path: list[Position], collision_cell: Position
+    ) -> Position:
+        """Return the last legal intermediate stop before collision_cell on path.
+
+        Walks path candidates in reverse from just before the collision cell.
+        Returns the first cell that is a legal destination from the source, or
+        the motion's source if no legal intermediate stop exists.
+        """
+        try:
+            collision_index = path.index(collision_cell)
+        except ValueError:
+            return motion.source
+
+        candidates = path[1:collision_index]  # exclude source and collision cell
+        legal = legal_destinations(self._board, motion.source, motion.piece)
+        for candidate in reversed(candidates):
+            if candidate in legal:
+                return candidate
+
+        return motion.source
+
+    # ------------------------------------------------------------------ #
+    # Arrival resolution                                                   #
+    # ------------------------------------------------------------------ #
 
     def _resolve_arrival(self, motion: Motion) -> None:
         """Apply the arrival transition atomically to the board.
@@ -131,20 +257,7 @@ class RealTimeArbiter:
             piece.state = PieceState.IDLE
 
     def _apply_promotion_if_needed(self, destination: Position, piece_token: str) -> None:
-        """Check if a piece should be promoted upon arrival and apply the transformation.
-        
-        Extraction flow:
-          - Piece token format: two characters, e.g. 'wP', 'bP', 'wK'.
-          - Color (first character): 'w' or 'b'.
-          - Piece type (second character): 'P', 'R', 'B', 'N', 'Q', 'K'.
-        
-        If the piece type transforms (e.g. Pawn to Queen), atomically update
-        the destination cell with the new token.
-        
-        Args:
-            destination: The arrival position.
-            piece_token: The two-character token string of the moving piece.
-        """
+        """Check if a piece should be promoted upon arrival and apply the transformation."""
         if len(piece_token) < 2:
             return
 
@@ -155,7 +268,6 @@ class RealTimeArbiter:
             piece_type, destination.row, self._board.rows, color
         )
 
-        # Apply promotion if the piece type changed
         if promoted_type != piece_type:
             promoted_token = color + promoted_type
             self._board.set(destination, promoted_token)

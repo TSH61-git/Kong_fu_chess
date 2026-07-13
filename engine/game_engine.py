@@ -12,10 +12,6 @@ from __future__ import annotations
 
 from typing import Optional, Protocol
 
-from engine.helpers.guard_helpers import (
-    has_route_conflict_with_active_motions,
-    is_source_locked,
-)
 from engine.helpers.snapshot_helpers import build_snapshot
 from engine.helpers.snapshot_models import GameSnapshot, MoveResult
 from model.board import Board
@@ -24,7 +20,6 @@ from rules.rule_engine import RuleEngine
 
 _OK = "ok"
 _GAME_OVER = "game_over"
-_MOTION_IN_PROGRESS = "motion_in_progress"
 
 
 class IRealTimeArbiter(Protocol):
@@ -75,12 +70,6 @@ class GameEngine:
         if self._game_over:
             return MoveResult(is_accepted=False, reason=_GAME_OVER)
 
-        if is_source_locked(self._arbiter, source):
-            return MoveResult(is_accepted=False, reason=_MOTION_IN_PROGRESS)
-
-        if has_route_conflict_with_active_motions(self._arbiter, source, destination):
-            return MoveResult(is_accepted=False, reason=_MOTION_IN_PROGRESS)
-
         validation = self._rule_engine.validate_move(self._board, source, destination)
         if not validation.is_valid:
             return MoveResult(is_accepted=False, reason=validation.reason)
@@ -100,9 +89,6 @@ class GameEngine:
         """Start an in-place jump motion for the piece at position."""
         if self._game_over:
             return MoveResult(is_accepted=False, reason=_GAME_OVER)
-
-        if is_source_locked(self._arbiter, position):
-            return MoveResult(is_accepted=False, reason=_MOTION_IN_PROGRESS)
 
         if self._board.get(position) == ".":
             return MoveResult(is_accepted=False, reason="empty_source")
