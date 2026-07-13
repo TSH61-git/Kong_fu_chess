@@ -15,6 +15,7 @@ Kong Fu Chess is a real-time, cooldown-driven variant of traditional chess in wh
 - In-place jumps are supported as zero-distance motions with a fixed duration, enabling immediate, local re-positioning without a traditional move-turn cycle.
 - The board resolves arrivals atomically at the exact completion instant, ensuring captures and promotions occur predictably.
 - The engine enforces safety guards so that overlapping motions and shared routes do not corrupt the board state.
+- Physical constants (`CELL_SIZE`, `PIECE_SPEED`) are centralized in `config.py` and drive all duration calculations.
 
 ### Design Intent
 
@@ -24,6 +25,7 @@ The project is structured around a clear separation of concerns:
 - Motion timing and arrival resolution are handled by a dedicated real-time arbiter.
 - Movement legality and promotion logic are implemented as pure, stateless rules.
 - The domain model remains simple, grid-based, and easy to reason about.
+- All text I/O is isolated behind a CLI gateway; the chess engine itself is fully string-blind.
 
 ---
 
@@ -31,182 +33,351 @@ The project is structured around a clear separation of concerns:
 
 The system is organized as a clean, decoupled multi-layer architecture that mirrors the responsibilities of a production-grade real-time game engine.
 
-### 1. Presentation / Controller Layer
+```
+app_gateways/text_cli/   CLI gateway (I/O boundary)
+chess_engine/engine/     Application service orchestration
+chess_engine/input/      Interaction and board-coordinate mapping
+chess_engine/model/      Domain objects: board, piece, position
+chess_engine/realtime/   Motion tracking and atomic arrival resolution
+chess_engine/rules/      Stateless movement and promotion rules
+chess_engine/tests/      Unit and integration coverage
+config.py                Global physical constants
+main.py                  Entry point
+```
 
-The input layer is responsible for translating user intent into semantic game operations.
+---
 
-- The controller captures raw interaction events and converts them into move requests.
-- It maintains lightweight selection state and forwards validated intents to the application service.
-- This layer is intentionally thin: it does not evaluate board rules, movement geometry, or timing.
+### 1. CLI Gateway — `app_gateways/text_cli/`
 
-Key modules:
-- [input/controller.py](input/controller.py)
-- [input/board_mapper.py](input/board_mapper.py)
+The sole boundary between raw text tokens and the typed engine. Nothing outside this package ever handles raw string tokens.
 
-### 2. Application Service Layer
+| Module | Responsibility |
+|---|---|
+| [translator.py](app_gateways/text_cli/translator.py) | Converts token strings ↔ typed `Piece` objects; parses and serializes `Board` |
+| [bootstrap.py](app_gateways/text_cli/bootstrap.py) | Factory that wires the full engine stack into a `GameRuntime` dataclass |
+| [console_runner.py](app_gateways/text_cli/console_runner.py) | Reads `board:` / `commands:` sections from stdin and dispatches commands |
+| [command_registry.py](app_gateways/text_cli/command_registry.py) | O(1) dispatch table mapping command names to handler functions |
+
+**Token format:** `wK`, `bQ`, `wR`, `bP`, etc. — color prefix + piece-type letter. Empty cells are `.`.
+
+**Bootstrap wiring order:**
+1. `Board` is created (or injected).
+2. `RuleEngine` is instantiated.
+3. `RealTimeArbiter` is created with the board (game engine reference set later).
+4. `GameEngine` is created with board, rule engine, and arbiter.
+5. `arbiter.attach_game_engine(engine)` closes the circular reference.
+6. `BoardMapper` and `Controller` are created and wrapped in `GameRuntime`.
+
+---
+
+### 2. Application Service Layer — `chess_engine/engine/`
 
 The engine orchestrates all gameplay flow between input, rules, and motion handling.
 
-- It validates moves before dispatching them.
-- It enforces application-level guards, including game-over state and motion routing conflicts.
-- It coordinates board snapshots and delegates time progression to the real-time arbiter.
+| Module | Responsibility |
+|---|---|
+| [game_engine.py](chess_engine/engine/game_engine.py) | Validates and dispatches moves; owns game-over state |
+| [helpers/snapshot_models.py](chess_engine/engine/helpers/snapshot_models.py) | Frozen DTOs: `MoveResult`, `GameSnapshot` |
+| [helpers/snapshot_helpers.py](chess_engine/engine/helpers/snapshot_helpers.py) | Pure builder functions for read-only board snapshots |
 
-Key module:
-- [engine/game_engine.py](engine/game_engine.py)
+**`GameEngine` public API:**
 
-### 3. Core Real-Time Layer
+- `request_move(source, destination) → MoveResult` — full guard chain + arbiter dispatch
+- `request_jump(position) → MoveResult` — in-place cooldown jump
+- `wait(ms)` / `advance_time(ms)` — delegates clock ticks to the arbiter
+- `get_snapshot(selected_cell) → GameSnapshot` — read-only board view
+- `notify_king_captured()` — sets the game-over flag (called by the arbiter on king capture)
 
-The real-time arbiter is the heart of the simulation.
+**Guard chain in `request_move` / `request_jump`:**
+1. Game-over check → `game_over`
+2. Cooldown check via `arbiter.is_in_cooldown(source)` → `cooldown_active`
+3. In-flight check via `_is_piece_in_flight(arbiter, source)` → `motion_in_progress`
+4. Rule validation via `RuleEngine.validate_move` → propagated reason string
+5. `arbiter.start_motion(...)` on success → `ok`
 
-- It tracks multiple in-flight motions concurrently without blocking the rest of the engine.
-- It acts as a clock-driven motion manager, advancing elapsed time and resolving arrivals when completion thresholds are met.
-- It is the only layer that mutates the board during active motion, which keeps state transitions centralized and deterministic.
+**`IRealTimeArbiter` protocol** is defined in `game_engine.py`, keeping the engine decoupled from the concrete arbiter implementation.
 
-Key module:
-- [realtime/real_time_arbiter.py](realtime/real_time_arbiter.py)
+---
 
-### 4. Rules Layer
+### 3. Input Layer — `chess_engine/input/`
 
-The rules subsystem is deliberately stateless and pure.
+Translates raw pixel events into semantic game operations. This layer is intentionally thin and does not evaluate board rules or timing.
 
-- Movement rules compute legal destinations from geometry and board occupancy.
-- Promotion rules determine transformation outcomes based on piece type, row, color, and board size.
-- This layer does not mutate the board and can be reasoned about independently from the simulation clock.
+| Module | Responsibility |
+|---|---|
+| [controller.py](chess_engine/input/controller.py) | Two-click selection state machine; forwards validated intents to the engine |
+| [board_mapper.py](chess_engine/input/board_mapper.py) | Converts pixel coordinates to `Position` using `CELL_SIZE` from `config.py` |
 
-Key modules:
-- [rules/movement_rules.py](rules/movement_rules.py)
-- [rules/promotion_rules.py](rules/promotion_rules.py)
-- [rules/rule_engine.py](rules/rule_engine.py)
+**Controller click semantics:**
+- First click on a piece → sets `selected_cell`.
+- Second click outside board → clears selection.
+- Second click on a friendly piece → swaps selection to that piece (no move request).
+- Second click on any other cell → calls `engine.request_move(source, destination)` and clears selection.
 
-### 5. Domain Model Layer
+---
 
-The domain model is intentionally minimal and explicit.
+### 4. Real-Time Layer — `chess_engine/realtime/`
 
-- Positions are represented as immutable coordinate objects.
-- The board is a matrix-based logical grid that stores piece tokens.
-- Pieces encapsulate identity and state without embedding movement logic or timing concerns.
+The real-time arbiter is the heart of the simulation. It is the only layer that mutates the board during active motion.
 
-Key modules:
-- [model/position.py](model/position.py)
-- [model/board.py](model/board.py)
-- [model/piece.py](model/piece.py)
+| Module | Responsibility |
+|---|---|
+| [arbiter.py](chess_engine/realtime/arbiter.py) | Clock-driven motion manager; resolves arrivals atomically |
+| [motion.py](chess_engine/realtime/motion.py) | Mutable dataclass tracking a single in-flight piece movement |
+
+#### `Motion` dataclass
+
+```python
+@dataclass(eq=False)
+class Motion:
+    piece: Piece
+    source: Position
+    destination: Position
+    elapsed_ms: int = 0
+    duration_ms: int = 0
+```
+
+Identity is by object reference (`eq=False`), not by field values, so two motions to the same cell are always distinct.
+
+#### `RealTimeArbiter` internals
+
+| Field | Type | Purpose |
+|---|---|---|
+| `_active_motions` | `list[Motion]` | All currently in-flight motions |
+| `_motion_pieces` | `dict[Motion, Piece]` | Tracks the shadow `MOVING` piece per motion for state reset on arrival |
+| `_cooldowns` | `dict[Position, int]` | Remaining cooldown ms per cell |
+
+**Duration calculation:** `steps × CELL_SIZE / PIECE_SPEED × 1000 ms`, where `steps = max(Δrow, Δcol)`.
+
+**`advance_time(ms)` sequence:**
+1. Tick down all cooldown counters; drop expired entries.
+2. Increment `elapsed_ms` on every active motion.
+3. Run `_resolve_mid_route_collisions()`.
+4. Collect completed motions (elapsed ≥ duration); sort by `(priority, index)` — linear arrivals (`priority=0`) before jump arrivals (`priority=1`).
+5. Call `_resolve_arrival(motion)` for each completed motion in order.
+
+**`is_in_cooldown(pos)` — piece-state-aware lookup:**
+```python
+def is_in_cooldown(self, pos: Position) -> bool:
+    if pos not in self._cooldowns:
+        return False
+    piece = self._board.get(pos)
+    return piece is not None and piece.state != PieceState.MOVING
+```
+A cooldown is only active when a piece is physically present on the cell **and** that piece is not currently `MOVING`. This allows a piece in transit that targets a cell to proceed without being blocked by a pre-existing cooldown on its destination, and allows vacant cells to be entered freely.
+
+**`_resolve_arrival(motion)` — atomic transition:**
+1. Clear source cell.
+2. Check destination for a king → call `game_engine.notify_king_captured()` if found.
+3. Apply pawn promotion via `_promoted(piece, row, board.rows)`.
+4. Place final piece at destination.
+5. Set `_cooldowns[destination] = 1000 ms`.
+6. Reset shadow piece state to `IDLE`.
+
+**`_cancel_motion(motion, land_at)` — mid-route stop:**
+- Removes motion from active list.
+- Places piece at `land_at` (last safe cell before collision).
+- Sets cooldown on `land_at`.
+- Resets shadow piece state to `IDLE`.
+
+---
+
+### 5. Rules Layer — `chess_engine/rules/`
+
+Deliberately stateless and pure. No board mutation occurs here.
+
+| Module | Responsibility |
+|---|---|
+| [engine.py](chess_engine/rules/engine.py) | `RuleEngine` — iterates the guard pipeline and returns `MoveValidation` |
+| [movement.py](chess_engine/rules/movement.py) | Legal destination computation per piece type via a functional registry |
+| [trajectory.py](chess_engine/rules/trajectory.py) | Linear path generation and route-overlap detection |
+| [guards/boundary_guard.py](chess_engine/rules/guards/boundary_guard.py) | Rejects out-of-bounds source or destination |
+| [guards/empty_source_guard.py](chess_engine/rules/guards/empty_source_guard.py) | Rejects moves from empty cells |
+| [guards/friendly_fire_guard.py](chess_engine/rules/guards/friendly_fire_guard.py) | Rejects moves onto friendly-occupied cells |
+| [guards/legal_move_guard.py](chess_engine/rules/guards/legal_move_guard.py) | Rejects destinations outside the piece's legal movement set |
+
+#### Guard Pipeline
+
+`RuleEngine.validate_move` iterates `_GUARDS` in order and returns the first failing reason:
+
+```
+boundary_guard → empty_source_guard → friendly_fire_guard → legal_move_guard
+```
+
+Each guard module exposes a single `check(board, source, destination) → str | None` function. Returning `None` means the guard passes.
+
+#### Movement Registry
+
+`movement.py` uses a `_REGISTRY: dict[PieceType, RuleFn]` for O(1) dispatch:
+
+| Piece | Strategy |
+|---|---|
+| ROOK | `_slide` along 4 cardinal directions |
+| BISHOP | `_slide` along 4 diagonal directions |
+| QUEEN | `_slide` along all 8 directions |
+| KNIGHT | Fixed L-shape offsets, no sliding |
+| KING | All 8 adjacent cells, one step |
+| PAWN | Forward step, optional double step from start row, diagonal captures only |
+
+`legal_destinations(board, from_pos, piece)` is the single public entry point.
+
+#### Trajectory Module
+
+- `linear_path(source, destination) → list[Position]` — generates the ordered list of cells along a straight or diagonal line.
+- `has_route_conflict(src_a, dst_a, src_b, dst_b) → bool` — returns `True` if two linear paths share any cell. Non-linear (knight/king) moves never conflict.
+
+---
+
+### 6. Domain Model — `chess_engine/model/`
+
+Minimal, explicit, and string-blind throughout.
+
+| Module | Key types |
+|---|---|
+| [position.py](chess_engine/model/position.py) | `Position(row, col)` — frozen dataclass, hashable, immutable |
+| [piece.py](chess_engine/model/piece.py) | `Piece(piece_type, color)`, `PieceType` enum, `Color` enum, `PieceState` enum |
+| [board.py](chess_engine/model/board.py) | `Board(rows, cols)` — matrix of `Piece \| None`; raises on out-of-bounds access |
+
+**`PieceState` enum:**
+
+| Value | Meaning |
+|---|---|
+| `IDLE` | Piece is at rest on the board |
+| `MOVING` | Piece has an active in-flight motion (shadow piece tracked by arbiter) |
+| `CAPTURED` | Piece has been removed from play |
+
+`Piece.__eq__` and `__hash__` are based on `(piece_type, color)` only — state is mutable and excluded from identity.
 
 ---
 
 ## DESIGN PATTERNS IMPLEMENTED
 
-The implementation uses a small but powerful set of patterns to preserve clarity while handling real-time complexity.
-
 ### Functional Registry Pattern
 
-Both movement and promotion logic replace large hardcoded decision trees with compact, constant-time registries.
+Both movement dispatch and guard sequencing replace large decision trees with compact, constant-time registries.
 
-- [rules/movement_rules.py](rules/movement_rules.py) uses a dispatch table keyed by piece type, enabling $O(1)$ lookup for rook, bishop, queen, knight, king, and pawn movement strategies.
-- [rules/promotion_rules.py](rules/promotion_rules.py) uses a similar registry for promotion outcomes, ensuring the logic remains extensible and declarative.
-
-This pattern dramatically improves maintainability while avoiding brittle if/else chains.
+- `movement.py` uses `_REGISTRY: dict[PieceType, RuleFn]` for O(1) piece-type dispatch.
+- `engine.py` uses `_GUARDS: list[module]` for ordered, short-circuit guard evaluation.
+- `command_registry.py` uses a `dict[str, CommandFn]` for O(1) CLI command dispatch.
 
 ### Real-Time Cooldown / Motion Queue State Machine
 
-The real-time layer behaves as a clock-driven state machine.
+Each motion transitions through three logical states:
 
-- Each motion is tracked as a stateful object with elapsed time and a total duration budget.
-- The arbiter advances the simulation and evaluates whether a motion has reached its completion threshold.
-- From a state-machine perspective, the motion transitions from pending to in-flight to resolved at the exact arrival boundary.
+```
+pending → in-flight (elapsed < duration) → resolved (elapsed ≥ duration)
+```
 
-Conceptually, the system evaluates a remaining-time budget derived from elapsed versus total duration, ensuring that no motion is resolved too early or too late.
+The arbiter advances the simulation clock and evaluates completion thresholds on every `advance_time` call. Cooldowns are a separate time-keyed dict that decays independently of active motions.
 
 ### Atomic Arrival & Concurrency Resolution
 
-Arrival handling is intentionally atomic.
+Arrival handling is a single consistent transition:
 
-- The arbiter clears the source cell, checks for captures, places the moving piece at the destination, and applies promotion as one consistent transition.
-- Linear trajectories are resolved before in-place jump completions, which prevents race-like ordering artifacts when multiple motions finish in the same window.
-- This yields deterministic board resolution even under concurrent arrival conditions.
+1. Clear source.
+2. Check for king capture.
+3. Apply promotion.
+4. Place piece at destination.
+5. Set cooldown.
 
-In practice, this means the engine resolves moves in a stable order: first standard linear paths, then jump arrivals from above, avoiding partial-state visibility and preserving the integrity of the board snapshot.
+Linear arrivals are resolved before jump arrivals in the same tick, preventing race-like ordering artifacts.
+
+### Piece-State-Aware Cooldown Guard
+
+`is_in_cooldown` consults both the cooldown registry and the live board state. A cell with a cooldown entry but no piece (vacated mid-flight) returns `False`, and a cell occupied by a `MOVING` piece also returns `False`. This cleanly separates spatial grid locking from piece-level action gating and is the foundation for future multi-piece coordination.
+
+### Protocol-Based Dependency Inversion
+
+`GameEngine` depends on `IRealTimeArbiter` (a `Protocol`) rather than the concrete `RealTimeArbiter`. `Controller` depends on `IGameEngine` (a `Protocol`). This keeps each layer independently testable and substitutable.
+
+### Immutable DTOs
+
+`MoveResult` and `GameSnapshot` are `@dataclass(frozen=True)`. `Position` is a `@dataclass(frozen=True)`. `MoveValidation` in `rules/engine.py` is also frozen. No mutable state leaks across layer boundaries through these objects.
 
 ---
 
 ## CONCURRENCY & ROUTING GUARDS
 
-Real-time routing safety is enforced with explicit guards so that motion semantics remain coherent under load.
-
 ### Same-Piece Lockout
 
-The engine prevents a piece from being commanded again while it already has an active motion.
+If a source cell already has an active motion (`_is_piece_in_flight`), the request is rejected with `motion_in_progress`. This prevents double-queuing a single piece.
 
-- If a source cell is currently in flight, the request is rejected with a `motion_in_progress` outcome.
-- This avoids double-queuing a single piece and eliminates ambiguous source ownership during transit.
+### Cooldown Lockout
+
+After a piece arrives or is cancelled, its destination cell enters a 1000 ms cooldown. `is_in_cooldown` blocks new move requests from that cell until the cooldown expires and the piece is idle.
 
 ### Shared Linear Route Collision
 
-Linear motions are checked against one another before they are accepted.
+`has_route_conflict` in `trajectory.py` detects overlapping linear paths before a motion is accepted. In-place jumps (`source == destination`) are non-linear and never participate in route-conflict checks.
 
-- Sliding pieces share path occupancy rules and cannot begin routes that intersect an active linear path.
-- In-place jumps are non-blocking by design and do not participate in the same route-collision semantics.
+### Mid-Route Collision Resolution
 
-This ensures that moving pieces do not create conflicting travel corridors or cause hidden board corruption during simultaneous motion.
+`_resolve_mid_route_collisions` runs on every `advance_time` tick:
+
+- Computes the current interpolated cell for each active motion via `_current_cell`.
+- When two motions occupy the same cell:
+  - **Enemy pieces:** the later-arriving motion is cancelled to the collision cell; if the earlier is a stationary jump, the linear motion is cancelled instead.
+  - **Friendly pieces:** the later motion is cancelled to its last legal stop before the collision cell, computed by `_last_legal_stop_before`.
+- Jump motions are always treated as "earlier" than linear motions at the same cell.
 
 ---
 
 ## VERIFICATION & TESTING
 
-The project includes a comprehensive, layered test suite covering rules, controller behavior, engine orchestration, real-time arbiter behavior, and integration scripts.
-
-### Running the Test Suite
-
 ```bash
-python -m pytest
+python -m pytest chess_engine/tests/ app_gateways/text_cli/tests/ -v
 ```
 
-### Current Verification Snapshot
+### Test Modules
 
-The repository currently collects 227 tests through pytest, covering:
+| File | Coverage area |
+|---|---|
+| `test_model.py` | `Position`, `Piece`, `PieceType`, `Color`, `PieceState`, `Board` |
+| `test_piece_rules.py` | Legal destinations for all six piece types |
+| `test_promotion_rules.py` | Pawn promotion at back rank for both colors and all board sizes |
+| `test_rule_engine.py` | Full guard pipeline: boundary, empty source, friendly fire, illegal move |
+| `test_board_mapper.py` | Pixel-to-cell mapping, boundary acceptance, out-of-bounds rejection |
+| `test_controller.py` | Two-click state machine, selection swap, request_move forwarding |
+| `test_game_engine.py` | Guard chain, game-over flag, snapshot, king-capture notification |
+| `test_cooldown.py` | Cooldown lifecycle, expiry, engine-level cooldown rejection |
+| `test_real_time_arbiter.py` | Motion tracking, atomic arrival, king capture, jump vs linear ordering |
+| `test_collisions.py` | Linear path, route conflict, mid-route enemy/friendly collision, arrival ordering |
+| `test_text_scripts.py` | End-to-end CLI script execution against expected output snapshots |
 
-- Integration scenarios
-- Edge-case handling
-- Matrix-driven rule validation
-- Real-time motion and arrival resolution
-- Board input/output and controller state transitions
-
-This makes the codebase suitable for iterative development while maintaining strong regression protection around the real-time motion model.
-
----
-
-## PROJECT LAYOUT
-
-```text
-engine/          Application service orchestration
-input/           Interaction and board-coordinate mapping
-model/           Domain objects: board, piece, position
-realtime/        Motion tracking and atomic arrival resolution
-rules/           Stateless movement and promotion rules
-text_io/         Board parsing and rendering
-tests/           Unit and integration coverage
-```
+Current count: **223 tests, all passing**.
 
 ---
 
 ## QUICK START
 
-A typical execution flow uses the console entry point in [main.py](main.py):
-
 ```bash
 python main.py
 ```
 
-Input is expected to follow the project’s structured board/command format, and the engine will emit state updates and board snapshots accordingly.
+Input is read from stdin in the following format:
+
+```
+board:
+wR . . . bR
+. . . . .
+. . wK . .
+. . . . .
+bK . . . .
+
+commands:
+click 0 0
+wait 500
+print board
+```
 
 ---
 
 ## SUMMARY
 
-Kong Fu Chess is a deliberately engineered real-time chess variant that combines:
+Kong Fu Chess combines:
 
-- a decoupled multi-layer architecture,
-- pure stateless rules,
-- deterministic motion arbitration,
-- and explicit safety guards for concurrency and routing.
-
-The result is a codebase that is both architecturally expressive and robust under real-time constraints.
+- a decoupled multi-layer architecture with strict string-blindness in the engine,
+- pure stateless rules with a functional registry and SRP guard pipeline,
+- deterministic motion arbitration with atomic arrival and piece-state-aware cooldown,
+- protocol-based dependency inversion for testability,
+- and explicit safety guards for concurrency, routing, and multi-piece coordination.
