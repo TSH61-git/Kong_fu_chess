@@ -7,6 +7,7 @@ from model.board import Board
 from model.piece import Piece, PieceState
 from model.position import Position
 from realtime.motion import Motion
+from rules.cooldown_rules import get_cooldown_duration
 from rules.movement_rules import legal_destinations
 from rules.promotion_rules import get_promoted_token
 from rules.route_rules import linear_path
@@ -30,6 +31,7 @@ class RealTimeArbiter:
         self._active_motions: list[Motion] = []
         self._active_piece: Optional[Piece] = None
         self._motion_pieces: dict[Motion, Piece] = {}
+        self._cooldowns: dict[Position, int] = {}
 
     @property
     def active_motion(self) -> Optional[Motion]:
@@ -88,9 +90,23 @@ class RealTimeArbiter:
         self._active_piece.state = PieceState.MOVING
         self._motion_pieces[motion] = self._active_piece
 
+    def is_in_cooldown(self, pos: Position) -> bool:
+        """Return True when the piece at pos is still cooling down."""
+        return self._cooldowns.get(pos, 0) > 0
+
     def advance_time(self, ms: int) -> None:
         """Advance all active motions by ms milliseconds and resolve arrivals."""
-        if not self._active_motions or ms <= 0:
+        if ms <= 0:
+            return
+
+        # Tick cooldowns regardless of whether any motion is active.
+        self._cooldowns = {
+            pos: remaining - ms
+            for pos, remaining in self._cooldowns.items()
+            if remaining - ms > 0
+        }
+
+        if not self._active_motions:
             return
 
         for motion in list(self._active_motions):
@@ -140,6 +156,7 @@ class RealTimeArbiter:
             self._active_motions.remove(motion)
         self._board.set(motion.source, ".")
         self._board.set(land_at, motion.piece)
+        self._cooldowns[land_at] = get_cooldown_duration(motion.piece)
         piece = self._motion_pieces.pop(motion, None)
         if piece is not None:
             piece.state = PieceState.IDLE
@@ -251,6 +268,8 @@ class RealTimeArbiter:
         self._board.set(motion.destination, motion.piece)
 
         self._apply_promotion_if_needed(motion.destination, motion.piece)
+
+        self._cooldowns[motion.destination] = get_cooldown_duration(motion.piece)
 
         piece = self._motion_pieces.pop(motion, None)
         if piece is not None:

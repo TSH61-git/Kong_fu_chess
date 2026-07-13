@@ -20,6 +20,7 @@ from rules.rule_engine import RuleEngine
 
 _OK = "ok"
 _GAME_OVER = "game_over"
+_COOLDOWN_ACTIVE = "cooldown_active"
 
 
 class IRealTimeArbiter(Protocol):
@@ -46,6 +47,10 @@ class IRealTimeArbiter(Protocol):
         """Advance the virtual timeline by ms milliseconds."""
         ...
 
+    def is_in_cooldown(self, pos: Position) -> bool:
+        """Return True if the piece at pos is still in its post-arrival cooldown."""
+        ...
+
 
 class GameEngine:
     """High-level application service orchestrating rules, motion, and state progression."""
@@ -70,6 +75,9 @@ class GameEngine:
         if self._game_over:
             return MoveResult(is_accepted=False, reason=_GAME_OVER)
 
+        if self._arbiter.is_in_cooldown(source):
+            return MoveResult(is_accepted=False, reason=_COOLDOWN_ACTIVE)
+
         validation = self._rule_engine.validate_move(self._board, source, destination)
         if not validation.is_valid:
             return MoveResult(is_accepted=False, reason=validation.reason)
@@ -89,6 +97,9 @@ class GameEngine:
         """Start an in-place jump motion for the piece at position."""
         if self._game_over:
             return MoveResult(is_accepted=False, reason=_GAME_OVER)
+
+        if self._arbiter.is_in_cooldown(position):
+            return MoveResult(is_accepted=False, reason=_COOLDOWN_ACTIVE)
 
         if self._board.get(position) == ".":
             return MoveResult(is_accepted=False, reason="empty_source")

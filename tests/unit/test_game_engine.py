@@ -35,6 +35,7 @@ def _mock_arbiter(has_active=False):
     """Return a mock IRealTimeArbiter with configurable has_active_motion."""
     arbiter = MagicMock()
     arbiter.has_active_motion.return_value = has_active
+    arbiter.is_in_cooldown.return_value = False
     return arbiter
 
 
