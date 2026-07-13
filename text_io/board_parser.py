@@ -1,11 +1,4 @@
-"""
-BoardParser — parses a list of text lines into a Board instance.
-
-Accepted token set mirrors the existing project convention:
-  color-prefix (w/b) + piece-type (K R B Q N P) or '.' for empty.
-
-Raises ValueError for unknown tokens, inconsistent row widths, or empty input.
-"""
+"""BoardParser — parses text lines into a Board instance."""
 from typing import List, Optional
 from model.board import Board
 from model.position import Position
@@ -21,19 +14,6 @@ class BoardParser:
 
     @staticmethod
     def parse(lines: List[str]) -> Board:
-        """
-        Parse space-separated token lines into a Board.
-
-        Args:
-            lines: Each non-blank line is one board row; tokens are
-                   separated by whitespace.
-
-        Returns:
-            A fully populated Board instance.
-
-        Raises:
-            ValueError: on empty input, unknown token, or row-width mismatch.
-        """
         rows: List[List[str]] = []
         expected_width: Optional[int] = None
 

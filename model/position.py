@@ -1,8 +1,4 @@
-"""
-Position — immutable value object representing a logical grid coordinate.
-
-Row and col are zero-based integers. No pixel or UI knowledge lives here.
-"""
+"""Position — immutable grid coordinate (row, col)."""
 from dataclasses import dataclass
 
 

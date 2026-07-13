@@ -1,13 +1,4 @@
-"""
-Application Service layer — GameEngine.
-
-Responsibility
---------------
-GameEngine is the central orchestrator of the game flow.  It sits between
-the input layer (Controller) and the real-time coordination layer
-(RealTimeArbiter), enforcing application-level guards before delegating
-to either the RuleEngine or the arbiter.
-"""
+"""Application service layer — GameEngine orchestrator."""
 from __future__ import annotations
 
 from typing import Optional, Protocol
@@ -26,30 +17,11 @@ _COOLDOWN_ACTIVE = "cooldown_active"
 class IRealTimeArbiter(Protocol):
     """Structural interface for the real-time coordination layer."""
 
-    def has_active_motion(self) -> bool:
-        """Return True if any piece is currently in transit."""
-        ...
-
-    def get_active_motions(self):
-        """Return a snapshot of the currently active motions."""
-        ...
-
-    def start_motion(
-        self,
-        piece: str,
-        source: Position,
-        destination: Position,
-    ) -> None:
-        """Register a new active motion for the given piece."""
-        ...
-
-    def advance_time(self, ms: int) -> None:
-        """Advance the virtual timeline by ms milliseconds."""
-        ...
-
-    def is_in_cooldown(self, pos: Position) -> bool:
-        """Return True if the piece at pos is still in its post-arrival cooldown."""
-        ...
+    def has_active_motion(self) -> bool: ...
+    def get_active_motions(self): ...
+    def start_motion(self, piece: str, source: Position, destination: Position) -> None: ...
+    def advance_time(self, ms: int) -> None: ...
+    def is_in_cooldown(self, pos: Position) -> bool: ...
 
 
 class GameEngine:
@@ -71,7 +43,6 @@ class GameEngine:
         source: Position,
         destination: Position,
     ) -> MoveResult:
-        """Attempt to initiate a piece move from source to destination."""
         if self._game_over:
             return MoveResult(is_accepted=False, reason=_GAME_OVER)
 
@@ -90,11 +61,9 @@ class GameEngine:
         return MoveResult(is_accepted=True, reason=_OK)
 
     def validate_move(self, board: Board, source: Position, destination: Position):
-        """Expose the underlying rules-layer validation result to the controller."""
         return self._rule_engine.validate_move(board, source, destination)
 
     def request_jump(self, position: Position) -> MoveResult:
-        """Start an in-place jump motion for the piece at position."""
         if self._game_over:
             return MoveResult(is_accepted=False, reason=_GAME_OVER)
 
@@ -113,27 +82,22 @@ class GameEngine:
         return MoveResult(is_accepted=True, reason=_OK)
 
     def advance_time(self, ms: int) -> None:
-        """Advance the virtual timeline by ms milliseconds."""
         self._arbiter.advance_time(ms)
 
     def wait(self, ms: int) -> None:
-        """Backward-compatible alias for advance_time."""
         self.advance_time(ms)
 
     def get_snapshot(
         self,
         selected_cell: Optional[Position] = None,
     ) -> GameSnapshot:
-        """Build a read-only snapshot of the current game state."""
         return build_snapshot(self._board, selected_cell, self._game_over)
 
     def snapshot(
         self,
         selected_cell: Optional[Position] = None,
     ) -> GameSnapshot:
-        """Backward-compatible alias for get_snapshot."""
         return self.get_snapshot(selected_cell)
 
     def notify_king_captured(self) -> None:
-        """Signal that a King has been captured and end the game."""
         self._game_over = True

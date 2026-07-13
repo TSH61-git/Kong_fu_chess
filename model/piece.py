@@ -1,9 +1,4 @@
-"""
-Piece — represents a chess piece with a pure lifecycle state.
-
-PieceState is a strict 3-value Enum: IDLE, MOVING, CAPTURED.
-It carries NO path, destination, speed, or timing information.
-"""
+"""Piece — chess piece with a pure IDLE/MOVING/CAPTURED lifecycle state."""
 from enum import Enum, auto
 
 
@@ -15,13 +10,7 @@ class PieceState(Enum):
 
 
 class Piece:
-    """
-    A chess piece identified by its token (e.g. 'wR', 'bK').
-
-    Attributes:
-        token: Two-character string — color prefix + piece type (e.g. 'wR').
-        state: Current lifecycle state. Defaults to PieceState.IDLE.
-    """
+    """A chess piece identified by its token (e.g. 'wR', 'bK')."""
 
     def __init__(self, token: str) -> None:
         self.token = token

@@ -17,13 +17,7 @@ PIECE_SPEED = 100
 
 
 class RealTimeArbiter:
-    """Coordinate multiple active motions and resolve arrivals atomically.
-
-    The arbiter is the only component that mutates the board during a motion.
-    It keeps each moving piece logically at its source until the exact arrival
-    millisecond, then clears the source, resolves captures, and places the
-    piece at the destination.
-    """
+    """Coordinate multiple active motions and resolve arrivals atomically."""
 
     def __init__(self, board: Board, game_engine: Optional[object] = None) -> None:
         self._board = board
@@ -35,36 +29,29 @@ class RealTimeArbiter:
 
     @property
     def active_motion(self) -> Optional[Motion]:
-        """Return the most recently started active motion, if one exists."""
         if not self._active_motions:
             return None
         return self._active_motions[-1]
 
     @property
     def active_piece(self) -> Optional[Piece]:
-        """Return the moving piece object that is currently or was last moving."""
         return self._active_piece
 
     @property
     def game_engine(self) -> Optional[object]:
-        """Return the application service hook used for king-capture notifications."""
         return self._game_engine
 
     @game_engine.setter
     def game_engine(self, value: Optional[object]) -> None:
-        """Attach or detach the application service hook for notifications."""
         self._game_engine = value
 
     def attach_game_engine(self, game_engine: object) -> None:
-        """Attach the application service hook used for king-capture notifications."""
         self.game_engine = game_engine
 
     def has_active_motion(self) -> bool:
-        """Return True when at least one motion is currently being tracked."""
         return bool(self._active_motions)
 
     def get_active_motions(self) -> list[Motion]:
-        """Return a snapshot of all active motions currently tracked by the arbiter."""
         return list(self._active_motions)
 
     def start_motion(
@@ -74,7 +61,6 @@ class RealTimeArbiter:
         destination: Position,
         duration_ms: Optional[int] = None,
     ) -> None:
-        """Begin a new motion and mark the moving piece as in transit."""
         resolved_duration = (
             duration_ms if duration_ms is not None else self._calculate_duration_ms(source, destination)
         )
@@ -91,11 +77,9 @@ class RealTimeArbiter:
         self._motion_pieces[motion] = self._active_piece
 
     def is_in_cooldown(self, pos: Position) -> bool:
-        """Return True when the piece at pos is still cooling down."""
         return self._cooldowns.get(pos, 0) > 0
 
     def advance_time(self, ms: int) -> None:
-        """Advance all active motions by ms milliseconds and resolve arrivals."""
         if ms <= 0:
             return
 
@@ -134,11 +118,6 @@ class RealTimeArbiter:
     # ------------------------------------------------------------------ #
 
     def _current_cell(self, motion: Motion) -> Position:
-        """Return the logical grid cell the motion occupies at its current elapsed_ms.
-
-        For in-place jumps (source == destination) the cell is always the source.
-        For linear moves, map the elapsed ratio to the path index.
-        """
         if motion.source == motion.destination or motion.duration_ms == 0:
             return motion.source
 
@@ -151,7 +130,6 @@ class RealTimeArbiter:
         return path[index]
 
     def _cancel_motion(self, motion: Motion, land_at: Position) -> None:
-        """Remove motion from active tracking and place the piece at land_at."""
         if motion in self._active_motions:
             self._active_motions.remove(motion)
         self._board.set(motion.source, ".")
@@ -162,15 +140,6 @@ class RealTimeArbiter:
             piece.state = PieceState.IDLE
 
     def _resolve_mid_route_collisions(self) -> None:
-        """Detect and resolve mid-route collisions between all active motion pairs.
-
-        Enemy collision: the piece that arrived at the shared cell later captures
-        the one that arrived earlier — the earlier motion is cancelled at that cell.
-
-        Friendly collision: the later-arriving piece is stopped at the last legal
-        cell before the collision point. If no legal intermediate stop exists the
-        motion is reverted to its source.
-        """
         motions = list(self._active_motions)
         to_cancel: dict[Motion, Position] = {}
 
@@ -227,12 +196,6 @@ class RealTimeArbiter:
     def _last_legal_stop_before(
         self, motion: Motion, path: list[Position], collision_cell: Position
     ) -> Position:
-        """Return the last legal intermediate stop before collision_cell on path.
-
-        Walks path candidates in reverse from just before the collision cell.
-        Returns the first cell that is a legal destination from the source, or
-        the motion's source if no legal intermediate stop exists.
-        """
         try:
             collision_index = path.index(collision_cell)
         except ValueError:
@@ -251,15 +214,6 @@ class RealTimeArbiter:
     # ------------------------------------------------------------------ #
 
     def _resolve_arrival(self, motion: Motion) -> None:
-        """Apply the arrival transition atomically to the board.
-
-        After a piece arrives at its destination:
-          1. Clear the source cell.
-          2. Check if the destination held a King (capture detection).
-          3. Place the piece at the destination, overwriting any occupant.
-          4. Check for pawn promotion and apply it if needed.
-          5. Mark the motion's piece as idle and remove it from active tracking.
-        """
         self._board.set(motion.source, ".")
         victim = self._board.get(motion.destination)
         if victim != "." and self._is_king(victim):
@@ -276,7 +230,6 @@ class RealTimeArbiter:
             piece.state = PieceState.IDLE
 
     def _apply_promotion_if_needed(self, destination: Position, piece_token: str) -> None:
-        """Check if a piece should be promoted upon arrival and apply the transformation."""
         if len(piece_token) < 2:
             return
 
@@ -292,7 +245,6 @@ class RealTimeArbiter:
             self._board.set(destination, promoted_token)
 
     def _calculate_duration_ms(self, source: Position, destination: Position) -> int:
-        """Return the travel time in milliseconds for this motion."""
         steps = max(
             abs(destination.row - source.row),
             abs(destination.col - source.col),
@@ -301,5 +253,4 @@ class RealTimeArbiter:
         return int(distance_px / PIECE_SPEED * 1000)
 
     def _is_king(self, token: str) -> bool:
-        """Return True when token represents a king piece."""
         return token in {"wK", "bK"}

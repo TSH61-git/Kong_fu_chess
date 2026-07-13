@@ -18,36 +18,29 @@ class ConsoleRunner:
 
     @property
     def runtime(self) -> Optional[GameRuntime]:
-        """Expose the underlying runtime container."""
         return self._runtime
 
     @property
     def board(self) -> Optional[Board]:
-        """Expose the live board instance used by the runtime."""
         return None if self._runtime is None else self._runtime.board
 
     @property
     def engine(self):
-        """Expose the application service instance."""
         return None if self._runtime is None else self._runtime.engine
 
     @property
     def arbiter(self):
-        """Expose the real-time arbiter instance."""
         return None if self._runtime is None else self._runtime.arbiter
 
     @property
     def controller(self):
-        """Expose the controller instance used for input dispatch."""
         return None if self._runtime is None else self._runtime.controller
 
     @property
     def mapper(self):
-        """Expose the board coordinate mapper instance."""
         return None if self._runtime is None else self._runtime.mapper
 
     def run(self, raw_text: Optional[str] = None) -> None:
-        """Parse and execute the command stream from the provided text."""
         text = raw_text if raw_text is not None else sys.stdin.read()
         board_lines, command_lines = self._split_sections(text)
         board = self._parse_board(board_lines)
@@ -60,7 +53,6 @@ class ConsoleRunner:
         self._run_commands(command_lines)
 
     def _split_sections(self, raw_text: str) -> Tuple[List[str], List[str]]:
-        """Split the textual input into board and command sections."""
         board_lines: List[str] = []
         command_lines: List[str] = []
         current_section: Optional[str] = None
@@ -86,7 +78,6 @@ class ConsoleRunner:
         return board_lines, command_lines
 
     def _parse_board(self, board_lines: Sequence[str]) -> Optional[Board]:
-        """Parse a board definition and return the resulting board object."""
         try:
             return BoardParser.parse(list(board_lines))
         except ValueError as exc:
@@ -100,7 +91,6 @@ class ConsoleRunner:
             return None
 
     def _run_commands(self, command_lines: Sequence[str]) -> None:
-        """Execute the parsed command stream against the runtime."""
         if self._runtime is None:
             return
 

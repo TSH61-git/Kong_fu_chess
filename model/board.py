@@ -1,8 +1,5 @@
 """
-Board — the logical grid of the game.
-
-Stores token strings (e.g. 'wR', '.') in a 2-D grid indexed by Position.
-No pixel coordinates, no movement rules, no timing logic.
+Board — logical grid storing token strings indexed by Position.
 """
 from typing import List
 from model.position import Position
@@ -11,15 +8,7 @@ _EMPTY = "."
 
 
 class Board:
-    """
-    Logical chess board of fixed dimensions.
-
-    Cells are addressed by Position(row, col) and store token strings.
-    All cells are initialised to '.' (empty).
-
-    Raises:
-        ValueError: when a Position is outside the board boundaries.
-    """
+    """Logical chess board of fixed dimensions; cells store token strings."""
 
     def __init__(self, rows: int, cols: int) -> None:
         self._rows = rows
