@@ -11,6 +11,7 @@ from chess_engine.rules.engine import MoveValidation
 
 class IGameEngine(Protocol):
     def request_move(self, source: Position, destination: Position) -> None: ...
+    def request_jump(self, position: Position) -> None: ...
     def validate_move(self, board: Board, source: Position, destination: Position) -> MoveValidation: ...
 
 
@@ -44,6 +45,7 @@ class Controller:
             return
         if source == cell:
             self._selected_cell = None
+            self._engine.request_jump(source)
             return
         validation = self._engine.validate_move(self._board, source, cell)
         if validation.reason == "friendly_destination":

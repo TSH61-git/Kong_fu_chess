@@ -132,10 +132,11 @@ class TestSecondClickInsideBoard:
             source=Position(0, 0), destination=Position(0, 1))
 
     def test_selection_cleared_even_if_destination_same_as_source(self):
-        ctrl, _ = _make(["wR ."])
+        ctrl, engine = _make(["wR ."])
         ctrl.click(50, 0)
         ctrl.click(50, 0)
         assert ctrl.selected_cell is None
+        engine.request_jump.assert_called_once_with(Position(0, 0))
 
     def test_friendly_destination_swaps_selection_without_requesting_move(self):
         ctrl, engine = _make(["wR wB ."])
@@ -151,6 +152,36 @@ class TestSecondClickInsideBoard:
         ctrl.click(250, 100)
         engine.request_move.assert_called_once_with(
             source=Position(0, 0), destination=Position(1, 2))
+
+
+class TestSecondClickSameCellJumps:
+    def test_calls_request_jump_with_correct_position(self):
+        ctrl, engine = _make(["wR ."])
+        ctrl.click(50, 0)
+        ctrl.click(50, 0)
+        engine.request_jump.assert_called_once_with(Position(0, 0))
+
+    def test_does_not_call_request_move(self):
+        ctrl, engine = _make(["wR ."])
+        ctrl.click(50, 0)
+        ctrl.click(50, 0)
+        engine.request_move.assert_not_called()
+
+    def test_clears_selection_after_jump(self):
+        ctrl, _ = _make(["wR ."])
+        ctrl.click(50, 0)
+        ctrl.click(50, 0)
+        assert ctrl.selected_cell is None
+
+    def test_jump_then_reselect_then_move(self):
+        ctrl, engine = _make(["wR . ."])
+        ctrl.click(50, 0)
+        ctrl.click(50, 0)
+        engine.request_jump.assert_called_once_with(Position(0, 0))
+        ctrl.click(50, 0)
+        ctrl.click(250, 0)
+        engine.request_move.assert_called_once_with(
+            source=Position(0, 0), destination=Position(0, 2))
 
 
 class TestSequentialClicks:
