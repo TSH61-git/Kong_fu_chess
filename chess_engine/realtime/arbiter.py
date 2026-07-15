@@ -59,6 +59,9 @@ class RealTimeArbiter:
     def get_active_motions(self) -> list[Motion]:
         return list(self._active_motions)
 
+    def get_cooldowns(self) -> dict[Position, int]:
+        return dict(self._cooldowns)
+
     def start_motion(
         self,
         piece: Piece,
