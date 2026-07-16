@@ -8,6 +8,8 @@ _WR = Piece(PieceType.ROOK, Color.WHITE)
 _BK = Piece(PieceType.KING, Color.BLACK)
 _BR = Piece(PieceType.ROOK, Color.BLACK)
 _WK = Piece(PieceType.KING, Color.WHITE)
+_WN = Piece(PieceType.KNIGHT, Color.WHITE)
+_WP = Piece(PieceType.PAWN, Color.WHITE)
 
 
 class TestRealTimeArbiter:
@@ -46,3 +48,13 @@ class TestRealTimeArbiter:
         arbiter.advance_time(1000)
         assert board.get(Position(0, 0)) == _WK
         assert board.get(Position(0, 2)) is None
+
+    def test_concurrent_knight_motion_does_not_hang_and_both_arrive(self):
+        board = _parse(["wN . . .", ". . . .", ". . wP ."])
+        arbiter = RealTimeArbiter(board=board, game_engine=MagicMock())
+        arbiter.start_motion(_WN, Position(0, 0), Position(2, 1), duration_ms=1000)
+        arbiter.start_motion(_WP, Position(2, 2), Position(1, 2), duration_ms=1000)
+        arbiter.advance_time(1000)
+        assert arbiter.has_active_motion() is False
+        assert board.get(Position(2, 1)) == _WN
+        assert board.get(Position(1, 2)) == _WP

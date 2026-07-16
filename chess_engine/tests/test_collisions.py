@@ -30,6 +30,9 @@ class TestLinearPath:
     def test_single_cell_jump(self):
         assert linear_path(Position(1,1), Position(1,1)) == [Position(1,1)]
 
+    def test_knight_shaped_move_returns_endpoints_without_hanging(self):
+        assert linear_path(Position(0,0), Position(2,1)) == [Position(0,0), Position(2,1)]
+
     def test_reverse_horizontal(self):
         assert linear_path(Position(0,3), Position(0,0)) == [
             Position(0,3), Position(0,2), Position(0,1), Position(0,0)]

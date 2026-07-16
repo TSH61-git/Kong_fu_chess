@@ -6,6 +6,8 @@ from chess_engine.model.position import Position
 def linear_path(source: Position, destination: Position) -> list[Position]:
     if source == destination:
         return [source]
+    if not _is_linear_move(source, destination):
+        return [source, destination]
     dr = 0 if source.row == destination.row else (1 if destination.row > source.row else -1)
     dc = 0 if source.col == destination.col else (1 if destination.col > source.col else -1)
     path: list[Position] = []
