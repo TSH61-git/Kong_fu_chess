@@ -126,7 +126,17 @@ class GuiRunner:
             dest_key = (prev_motion.destination.row, prev_motion.destination.col)
             dest_piece = board.get(Position(*dest_key))
             if dest_piece is not None and dest_piece.color == prev_motion.piece.color:
-                self._animators[dest_key] = anim
+                if dest_piece.piece_type != prev_motion.piece.piece_type:
+                    # pawn promoted on arrival — the old animator was built
+                    # from the pawn's sprite set, so it must be rebuilt from
+                    # the promoted piece (e.g. queen) instead of reused.
+                    # Seed it in MOVE so it flows into the same rest
+                    # transition as any other arriving piece this frame.
+                    new_anim = self._make_animator(dest_piece)
+                    new_anim.transition_to(AnimState.MOVE)
+                    self._animators[dest_key] = new_anim
+                else:
+                    self._animators[dest_key] = anim
             # else: this motion's piece was captured mid-route — its
             # animator is discarded, leaving the survivor's animator
             # (already correctly keyed at dest_key) untouched.
