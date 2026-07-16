@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from chess_engine.engine.event_manager import EventManager
 from chess_engine.engine.events import PieceCaptured
+from chess_engine.engine.helpers.piece_info import PieceInfo
 from chess_engine.model.piece import Color, Piece, PieceType
 
 _DEFAULT = 5
@@ -23,7 +24,7 @@ PIECE_VALUES: dict[PieceType, int] = {
 
 @dataclass(frozen=True)
 class CapturedEntry:
-    piece: Piece
+    piece: PieceInfo
     captured_by: Color
     timestamp: float
 
@@ -37,8 +38,13 @@ class ScoreManager:
         self.record_capture(event.piece, event.captured_by)
 
     def record_capture(self, piece: Piece, captured_by: Color) -> None:
+        # `piece` is the real domain Piece coming from the engine side
+        # (event or direct call); only its display-relevant identity is
+        # kept from this point on, so nothing downstream can reach for
+        # Piece internals (e.g. mutable .state) that don't belong in a
+        # captured-pieces display.
         self._entries.append(CapturedEntry(
-            piece=piece, captured_by=captured_by, timestamp=time.time(),
+            piece=PieceInfo.from_piece(piece), captured_by=captured_by, timestamp=time.time(),
         ))
 
     def get_captured(self, color: Color) -> list[CapturedEntry]:

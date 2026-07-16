@@ -1,5 +1,6 @@
 from chess_engine.engine.event_manager import EventManager
 from chess_engine.engine.events import PieceCaptured
+from chess_engine.engine.helpers.piece_info import PieceInfo
 from chess_engine.engine.helpers.score_manager import PIECE_VALUES, ScoreManager
 from chess_engine.model.piece import Color, Piece, PieceType
 
@@ -14,7 +15,7 @@ class TestScoreManagerCaptureAttribution:
         mgr.record_capture(_BP, captured_by=Color.WHITE)
 
         assert len(mgr.get_captured(Color.WHITE)) == 1
-        assert mgr.get_captured(Color.WHITE)[0].piece == _BP
+        assert mgr.get_captured(Color.WHITE)[0].piece == PieceInfo(PieceType.PAWN, Color.BLACK)
         assert mgr.get_captured(Color.BLACK) == []
 
     def test_multiple_captures_accumulate_per_color(self):
@@ -52,3 +53,17 @@ class TestScoreManagerSubscribesToEvents:
 
         assert len(mgr.get_captured(Color.WHITE)) == 1
         assert mgr.get_scores()[Color.WHITE] == PIECE_VALUES[PieceType.PAWN]
+
+
+class TestCapturedEntryIsADto:
+    def test_piece_info_from_piece_extracts_type_and_color(self):
+        info = PieceInfo.from_piece(_BQ)
+        assert info == PieceInfo(PieceType.QUEEN, Color.BLACK)
+
+    def test_captured_entry_holds_a_piece_info_not_the_original_piece(self):
+        mgr = ScoreManager(EventManager())
+        mgr.record_capture(_BP, captured_by=Color.WHITE)
+
+        stored = mgr.get_captured(Color.WHITE)[0].piece
+        assert isinstance(stored, PieceInfo)
+        assert not isinstance(stored, Piece)
