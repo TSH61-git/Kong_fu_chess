@@ -33,6 +33,7 @@ class RealTimeArbiter:
         self._active_piece: Optional[Piece] = None
         self._motion_pieces: dict[Motion, Piece] = {}
         self._cooldowns: dict[Position, int] = {}
+        self._captures: list[tuple[Piece, Color]] = []
 
     @property
     def active_motion(self) -> Optional[Motion]:
@@ -61,6 +62,13 @@ class RealTimeArbiter:
 
     def get_cooldowns(self) -> dict[Position, int]:
         return dict(self._cooldowns)
+
+    def take_captures(self) -> list[tuple[Piece, Color]]:
+        # Drain and return capture events recorded since the last call
+        # (mid-route / jump-defense captures only — see _capture_motion).
+        captures = self._captures
+        self._captures = []
+        return captures
 
     def start_motion(
         self,
@@ -102,7 +110,10 @@ class RealTimeArbiter:
         completed: list[tuple[int, int, Motion]] = []
         for index, motion in enumerate(self._active_motions):
             if motion.elapsed_ms >= motion.duration_ms:
-                priority = 0 if motion.source != motion.destination else 1
+                is_hold = motion.source == motion.destination
+                if is_hold and self._has_pending_enemy_contest(motion):
+                    continue
+                priority = 0 if not is_hold else 1
                 completed.append((priority, index, motion))
         if not completed:
             return
@@ -111,6 +122,16 @@ class RealTimeArbiter:
             if motion in self._active_motions:
                 self._active_motions.remove(motion)
                 self._resolve_arrival(motion)
+
+    def _has_pending_enemy_contest(self, motion: Motion) -> bool:
+        for other in self._active_motions:
+            if other is motion or other.piece.color == motion.piece.color:
+                continue
+            if other.destination != motion.source or other.elapsed_ms >= other.duration_ms:
+                continue
+            if other.duration_ms <= motion.duration_ms:
+                return True
+        return False
 
     def _current_cell(self, motion: Motion) -> Position:
         if motion.source == motion.destination or motion.duration_ms == 0:
@@ -134,36 +155,60 @@ class RealTimeArbiter:
     def _resolve_mid_route_collisions(self) -> None:
         motions = list(self._active_motions)
         to_cancel: dict[Motion, Position] = {}
+        to_capture: dict[Motion, Color] = {}
         for i in range(len(motions)):
             for j in range(i + 1, len(motions)):
                 a, b = motions[i], motions[j]
-                if a in to_cancel or b in to_cancel:
+                if a in to_cancel or b in to_cancel or a in to_capture or b in to_capture:
                     continue
                 cell_a = self._current_cell(a)
                 cell_b = self._current_cell(b)
                 if cell_a != cell_b:
                     continue
-                a_is_jump = a.source == a.destination
-                b_is_jump = b.source == b.destination
-                if a_is_jump and not b_is_jump:
+                is_hold_a = a.source == a.destination
+                is_hold_b = b.source == b.destination
+                if is_hold_a != is_hold_b:
+                    # A piece actively jumping in place is never the one
+                    # captured: it survives and captures whichever enemy
+                    # motion lands on its cell while it is mid-jump.
+                    holder, attacker = (a, b) if is_hold_a else (b, a)
+                    if holder.piece.color != attacker.piece.color:
+                        to_capture[attacker] = holder.piece.color
+                    continue
+                a_done = a.elapsed_ms >= a.duration_ms
+                b_done = b.elapsed_ms >= b.duration_ms
+                if a_done and b_done:
+                    continue
+                if a_done and not b_done:
                     later, earlier = b, a
-                elif b_is_jump and not a_is_jump:
+                elif b_done and not a_done:
                     later, earlier = a, b
                 else:
-                    ratio_a = a.elapsed_ms / a.duration_ms if a.duration_ms > 0 else 1.0
-                    ratio_b = b.elapsed_ms / b.duration_ms if b.duration_ms > 0 else 1.0
-                    later, earlier = (b, a) if ratio_b >= ratio_a else (a, b)
+                    remaining_a = a.duration_ms - a.elapsed_ms
+                    remaining_b = b.duration_ms - b.elapsed_ms
+                    later, earlier = (a, b) if remaining_a >= remaining_b else (b, a)
                 if a.piece.color != b.piece.color:
-                    if earlier.source == earlier.destination:
-                        to_cancel[later] = earlier.destination
-                    else:
-                        to_cancel[earlier] = cell_a
+                    to_capture[earlier] = later.piece.color
                 else:
                     path = linear_path(later.source, later.destination)
                     to_cancel[later] = self._last_legal_stop_before(later, path, cell_a)
         for motion, land_at in to_cancel.items():
             if motion in self._active_motions:
                 self._cancel_motion(motion, land_at)
+        for motion, captor_color in to_capture.items():
+            self._capture_motion(motion, captured_by=captor_color)
+
+    def _capture_motion(self, motion: Motion, captured_by: Optional[Color] = None) -> None:
+        if motion in self._active_motions:
+            self._active_motions.remove(motion)
+        self._board.set(motion.source, None)
+        if motion.piece.piece_type == PieceType.KING and self._game_engine is not None:
+            self._game_engine.notify_king_captured()
+        if captured_by is not None:
+            self._captures.append((motion.piece, captured_by))
+        piece = self._motion_pieces.pop(motion, None)
+        target = piece if piece is not None else motion.piece
+        target.state = PieceState.CAPTURED
 
     def _last_legal_stop_before(
         self, motion: Motion, path: list[Position], collision_cell: Position

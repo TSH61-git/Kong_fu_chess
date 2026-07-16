@@ -55,5 +55,17 @@ class ScoreTracker:
         self._prev_moving_sources = moving_sources
         self._prev_arriving_dests = arriving_dests
 
+    def record_captures(self, captures: list[tuple[Piece, Color]]) -> None:
+        """Record capture events reported directly by the arbiter — this
+        covers mid-route / jump-defense captures, which never show up as a
+        clean "idle victim overwritten at an arrival cell" pattern that
+        update() can detect from a board diff alone."""
+        for piece, captured_by in captures:
+            self._entries.append(CapturedEntry(
+                piece=piece,
+                captured_by=captured_by,
+                timestamp=time.time(),
+            ))
+
     def get_captured(self, color: Color) -> list[CapturedEntry]:
         return [e for e in self._entries if e.captured_by == color]

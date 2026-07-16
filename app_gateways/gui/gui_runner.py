@@ -69,10 +69,12 @@ class GuiRunner:
             )
             motions   = self._runtime.arbiter.get_active_motions()
             cooldowns = self._runtime.arbiter.get_cooldowns()
+            captures  = self._runtime.arbiter.take_captures()
 
             self._sync_animators(motions)
             self._update_animators(delta_ms)
             self._score.update(snapshot, motions)
+            self._score.record_captures(captures)
 
             self._renderer.draw(
                 self._canvas, snapshot, self._animators, motions, cooldowns,
@@ -108,6 +110,13 @@ class GuiRunner:
         # 0. Motions that were active last frame but finished this frame:
         #    relocate their (still MOVE/JUMP-state) animator from the source
         #    cell to the destination cell, so it can transition into rest.
+        #    A motion can "finish" two different ways: it actually arrived,
+        #    or it was captured mid-route (e.g. by a defending jump) and
+        #    never reached its destination at all. Only relocate the
+        #    animator when the piece now standing at the destination is
+        #    still this motion's own piece (same color) — otherwise the
+        #    motion's piece was captured, so its animator must be dropped
+        #    instead of overwriting the actual survivor's animator there.
         for key, prev_motion in self._prev_by_source.items():
             if key in by_source:
                 continue
@@ -115,7 +124,12 @@ class GuiRunner:
             if anim is None:
                 continue
             dest_key = (prev_motion.destination.row, prev_motion.destination.col)
-            self._animators[dest_key] = anim
+            dest_piece = board.get(Position(*dest_key))
+            if dest_piece is not None and dest_piece.color == prev_motion.piece.color:
+                self._animators[dest_key] = anim
+            # else: this motion's piece was captured mid-route — its
+            # animator is discarded, leaving the survivor's animator
+            # (already correctly keyed at dest_key) untouched.
         self._prev_by_source = by_source
 
         # 1. For every active motion — ensure animator exists at source key

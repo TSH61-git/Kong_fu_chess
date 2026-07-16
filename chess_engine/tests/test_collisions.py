@@ -70,22 +70,28 @@ class TestEnemyMidRouteCollision:
         cells = [board.get(Position(0, c)) for c in range(5)]
         assert _WR in cells or _BR in cells
 
-    def test_stationary_jump_holds_cell_against_incoming_enemy(self):
+    def test_mover_captures_hold_piece_once_it_actually_arrives(self):
         arbiter, board = self._arbiter(["wK . . bR"])
         arbiter.start_motion(_WK, Position(0,0), Position(0,0), duration_ms=1000)
         arbiter.start_motion(_BR, Position(0,3), Position(0,0), duration_ms=3000)
         arbiter.advance_time(1000)
+        # Not colliding yet: the rook hasn't reached (0,0), so the hold motion
+        # resolves normally and the king sits back down.
         assert board.get(Position(0, 0)) == _WK
+        arbiter.advance_time(2000)
+        # Once the rook actually lands, it captures the king that finished
+        # resting there long before.
+        assert board.get(Position(0, 0)) == _BR
 
-    def test_enemy_linear_vs_linear_head_on_both_stopped(self):
+    def test_enemy_linear_vs_linear_head_on_loser_fully_captured(self):
         arbiter, board = self._arbiter([". . . . ."])
         board.set(Position(0, 0), _WR)
         board.set(Position(0, 4), _BR)
         arbiter.start_motion(_WR, Position(0,0), Position(0,4), duration_ms=4000)
         arbiter.start_motion(_BR, Position(0,4), Position(0,0), duration_ms=4000)
         arbiter.advance_time(2000)
-        assert board.get(Position(0, 4)) != _WR
-        assert board.get(Position(0, 0)) != _BR
+        cells = [board.get(Position(0, c)) for c in range(5)]
+        assert (_WR in cells) != (_BR in cells)
 
 
 class TestFriendlyMidRouteCollision:
@@ -135,3 +141,37 @@ class TestCollisionOrdering:
         arbiter.advance_time(2000)
         result = board.get(Position(0, 2))
         assert result in {_WR, _BR}
+
+
+class TestJumpDefendsAgainstIncomingCapture:
+    # Regression coverage for the "jumping pawn eaten by the piece that
+    # arrives" bug: a piece actively holding a jump on a cell must survive
+    # and capture an enemy motion that lands on that same cell, instead of
+    # being captured itself (or silently erased).
+    def _arbiter(self, lines):
+        board = _parse(lines)
+        return RealTimeArbiter(board=board, game_engine=MagicMock()), board
+
+    def test_jump_survives_and_captures_enemy_landing_on_same_cell(self):
+        arbiter, board = self._arbiter(["wP . . bP .", ". . . . ."])
+        wp = board.get(Position(0, 0))
+        bp = board.get(Position(0, 3))
+        # black starts an in-place jump on its own cell
+        arbiter.start_motion(bp, Position(0, 3), Position(0, 3), duration_ms=1000)
+        arbiter.advance_time(500)
+        # white starts a linear move landing on the same cell mid-jump
+        arbiter.start_motion(wp, Position(0, 0), Position(0, 3), duration_ms=1000)
+        arbiter.advance_time(1000)
+        assert board.get(Position(0, 3)) == bp
+        assert board.get(Position(0, 0)) is None
+
+    def test_jump_started_after_attacker_still_wins(self):
+        arbiter, board = self._arbiter(["wP . . bP .", ". . . . ."])
+        wp = board.get(Position(0, 0))
+        bp = board.get(Position(0, 3))
+        arbiter.start_motion(wp, Position(0, 0), Position(0, 3), duration_ms=1000)
+        arbiter.advance_time(900)
+        arbiter.start_motion(bp, Position(0, 3), Position(0, 3), duration_ms=1000)
+        arbiter.advance_time(1000)
+        assert board.get(Position(0, 3)) == bp
+        assert board.get(Position(0, 0)) is None
