@@ -1,0 +1,73 @@
+# Chronological log of accepted moves, mirroring the MoveResult/GameSnapshot DTOs.
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+
+from chess_engine.model.piece import Color, Piece, PieceType
+from chess_engine.model.position import Position
+
+_PIECE_LETTERS: dict[PieceType, str] = {
+    PieceType.KING:   "K",
+    PieceType.QUEEN:  "Q",
+    PieceType.ROOK:   "R",
+    PieceType.BISHOP: "B",
+    PieceType.KNIGHT: "N",
+    PieceType.PAWN:   "P",
+}
+
+_COLOR_TAGS: dict[Color, str] = {
+    Color.WHITE: "W",
+    Color.BLACK: "B",
+}
+
+
+@dataclass(frozen=True)
+class MoveRecord:
+    index: int
+    color: Color
+    piece_type: PieceType
+    source: Position
+    destination: Position
+    is_capture: bool
+    timestamp: float
+
+    def display_text(self) -> str:
+        letter = _PIECE_LETTERS[self.piece_type]
+        tag    = _COLOR_TAGS[self.color]
+        src    = f"({self.source.row},{self.source.col})"
+        dst    = f"({self.destination.row},{self.destination.col})"
+        capture_marker = " x" if self.is_capture else ""
+        return f"{letter} {tag} {src}->{dst}{capture_marker}"
+
+
+class MoveHistory:
+    """Records accepted moves in acceptance order.
+
+    Kung-fu chess moves happen in real time rather than in alternating
+    turns, so entries are a single chronological feed (not White/Black
+    move pairs) ordered purely by when each request was accepted.
+    """
+
+    def __init__(self) -> None:
+        self._entries: list[MoveRecord] = []
+
+    def record(
+        self,
+        piece: Piece,
+        source: Position,
+        destination: Position,
+        is_capture: bool = False,
+    ) -> None:
+        self._entries.append(MoveRecord(
+            index=len(self._entries) + 1,
+            color=piece.color,
+            piece_type=piece.piece_type,
+            source=source,
+            destination=destination,
+            is_capture=is_capture,
+            timestamp=time.time(),
+        ))
+
+    def entries(self) -> list[MoveRecord]:
+        return self._entries

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, Protocol
 
+from chess_engine.engine.helpers.move_history import MoveHistory, MoveRecord
 from chess_engine.engine.helpers.snapshot_helpers import build_snapshot
 from chess_engine.engine.helpers.snapshot_models import GameSnapshot, MoveResult
 from chess_engine.model.board import Board
@@ -38,6 +39,7 @@ class GameEngine:
         self._rule_engine = rule_engine
         self._arbiter = arbiter
         self._game_over: bool = False
+        self._history = MoveHistory()
 
     def request_move(self, source: Position, destination: Position) -> MoveResult:
         if self._game_over:
@@ -57,6 +59,10 @@ class GameEngine:
         self._arbiter.start_motion(
             piece=self._board.get(source), source=source, destination=destination,
         )
+        if moving_piece is not None:
+            target = self._board.get(destination)
+            is_capture = target is not None and target.color != moving_piece.color
+            self._history.record(moving_piece, source, destination, is_capture=is_capture)
         return MoveResult(is_accepted=True, reason=_OK)
 
     def validate_move(self, board: Board, source: Position, destination: Position):
@@ -69,11 +75,13 @@ class GameEngine:
             return MoveResult(is_accepted=False, reason=_COOLDOWN_ACTIVE)
         if _is_piece_in_flight(self._arbiter, position):
             return MoveResult(is_accepted=False, reason=_MOTION_IN_PROGRESS)
-        if self._board.get(position) is None:
+        jumping_piece = self._board.get(position)
+        if jumping_piece is None:
             return MoveResult(is_accepted=False, reason="empty_source")
         self._arbiter.start_motion(
-            piece=self._board.get(position), source=position, destination=position, duration_ms=1000,
+            piece=jumping_piece, source=position, destination=position, duration_ms=1000,
         )
+        self._history.record(jumping_piece, position, position, is_capture=False)
         return MoveResult(is_accepted=True, reason=_OK)
 
     def advance_time(self, ms: int) -> None:
@@ -90,3 +98,6 @@ class GameEngine:
 
     def notify_king_captured(self) -> None:
         self._game_over = True
+
+    def history_entries(self) -> list[MoveRecord]:
+        return self._history.entries()

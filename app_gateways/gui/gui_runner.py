@@ -82,6 +82,7 @@ class GuiRunner:
                     Color.WHITE: self._score.get_captured(Color.WHITE),
                     Color.BLACK: self._score.get_captured(Color.BLACK),
                 },
+                self._runtime.engine.history_entries(),
             )
 
             cv2.imshow(_WINDOW, self._canvas.img)
