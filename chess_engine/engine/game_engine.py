@@ -13,6 +13,7 @@ _OK = "ok"
 _GAME_OVER = "game_over"
 _COOLDOWN_ACTIVE = "cooldown_active"
 _MOTION_IN_PROGRESS = "motion_in_progress"
+_DESTINATION_CLAIMED = "destination_claimed"
 
 
 def _is_piece_in_flight(arbiter, source: Position) -> bool:
@@ -28,6 +29,7 @@ class IRealTimeArbiter(Protocol):
     def start_motion(self, piece: str, source: Position, destination: Position) -> None: ...
     def advance_time(self, ms: int) -> None: ...
     def is_in_cooldown(self, pos: Position) -> bool: ...
+    def is_destination_claimed(self, destination: Position, color) -> bool: ...
 
 
 class GameEngine:
@@ -47,6 +49,11 @@ class GameEngine:
         validation = self._rule_engine.validate_move(self._board, source, destination)
         if not validation.is_valid:
             return MoveResult(is_accepted=False, reason=validation.reason)
+        moving_piece = self._board.get(source)
+        if moving_piece is not None and self._arbiter.is_destination_claimed(
+            destination, moving_piece.color
+        ):
+            return MoveResult(is_accepted=False, reason=_DESTINATION_CLAIMED)
         self._arbiter.start_motion(
             piece=self._board.get(source), source=source, destination=destination,
         )

@@ -94,6 +94,17 @@ class RealTimeArbiter:
         piece = self._board.get(pos)
         return piece is not None and piece.state != PieceState.MOVING
 
+    def is_destination_claimed(self, destination: Position, color: Color) -> bool:
+        # True if a friendly piece is already mid-flight (or holding a jump)
+        # to this square — the board itself won't show that until it lands,
+        # so callers must ask here before starting a second motion onto it.
+        for motion in self._active_motions:
+            if motion.source == motion.destination:
+                continue
+            if motion.destination == destination and motion.piece.color == color:
+                return True
+        return False
+
     def advance_time(self, ms: int) -> None:
         if ms <= 0:
             return
@@ -225,8 +236,23 @@ class RealTimeArbiter:
         return motion.source
 
     def _resolve_arrival(self, motion: Motion) -> None:
-        self._board.set(motion.source, None)
         victim = self._board.get(motion.destination)
+        if victim is not None and motion.source != motion.destination and victim.color == motion.piece.color:
+            # A friendly piece beat us to the destination while we were mid-
+            # flight (the square looked empty when this motion was accepted).
+            # We can't land on our own piece, so pull up short instead of
+            # silently overwriting it.
+            path = linear_path(motion.source, motion.destination)
+            land_at = self._last_legal_stop_before(motion, path, motion.destination)
+            piece = self._motion_pieces.pop(motion, None)
+            if piece is not None:
+                piece.state = PieceState.IDLE
+            if land_at != motion.source:
+                self._board.set(motion.source, None)
+                self._board.set(land_at, motion.piece)
+                self._cooldowns[land_at] = _COOLDOWN_MS
+            return
+        self._board.set(motion.source, None)
         if victim is not None and victim.piece_type == PieceType.KING:
             if self._game_engine is not None:
                 self._game_engine.notify_king_captured()
