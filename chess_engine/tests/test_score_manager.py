@@ -1,0 +1,41 @@
+from chess_engine.engine.helpers.score_manager import PIECE_VALUES, ScoreManager
+from chess_engine.model.piece import Color, Piece, PieceType
+
+_WR = Piece(PieceType.ROOK, Color.WHITE)
+_BP = Piece(PieceType.PAWN, Color.BLACK)
+_BQ = Piece(PieceType.QUEEN, Color.BLACK)
+
+
+class TestScoreManagerCaptureAttribution:
+    def test_capture_attributed_to_the_capturing_color(self):
+        mgr = ScoreManager()
+        mgr.record_capture(_BP, captured_by=Color.WHITE)
+
+        assert len(mgr.get_captured(Color.WHITE)) == 1
+        assert mgr.get_captured(Color.WHITE)[0].piece == _BP
+        assert mgr.get_captured(Color.BLACK) == []
+
+    def test_multiple_captures_accumulate_per_color(self):
+        mgr = ScoreManager()
+        mgr.record_capture(_BP, captured_by=Color.WHITE)
+        mgr.record_capture(_WR, captured_by=Color.BLACK)
+
+        assert len(mgr.get_captured(Color.WHITE)) == 1
+        assert len(mgr.get_captured(Color.BLACK)) == 1
+
+
+class TestScoreManagerScores:
+    def test_score_sums_piece_values_by_capturing_color(self):
+        mgr = ScoreManager()
+        mgr.record_capture(_BP, captured_by=Color.WHITE)
+        mgr.record_capture(_BQ, captured_by=Color.WHITE)
+
+        scores = mgr.get_scores()
+        assert scores[Color.WHITE] == PIECE_VALUES[PieceType.PAWN] + PIECE_VALUES[PieceType.QUEEN]
+        assert scores[Color.BLACK] == 0
+
+    def test_no_captures_yields_zero_scores(self):
+        mgr = ScoreManager()
+        scores = mgr.get_scores()
+        assert scores[Color.WHITE] == 0
+        assert scores[Color.BLACK] == 0

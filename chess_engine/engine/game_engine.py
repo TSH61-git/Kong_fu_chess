@@ -4,9 +4,11 @@ from __future__ import annotations
 from typing import Optional, Protocol
 
 from chess_engine.engine.helpers.move_history import MoveHistory, MoveRecord
+from chess_engine.engine.helpers.score_manager import CapturedEntry, ScoreManager
 from chess_engine.engine.helpers.snapshot_helpers import build_snapshot
 from chess_engine.engine.helpers.snapshot_models import GameSnapshot, MoveResult
 from chess_engine.model.board import Board
+from chess_engine.model.piece import Color
 from chess_engine.model.position import Position
 from chess_engine.rules.engine import RuleEngine
 
@@ -31,6 +33,7 @@ class IRealTimeArbiter(Protocol):
     def advance_time(self, ms: int) -> None: ...
     def is_in_cooldown(self, pos: Position) -> bool: ...
     def is_destination_claimed(self, destination: Position, color) -> bool: ...
+    def take_captures(self) -> list: ...
 
 
 class GameEngine:
@@ -40,6 +43,7 @@ class GameEngine:
         self._arbiter = arbiter
         self._game_over: bool = False
         self._history = MoveHistory()
+        self._score = ScoreManager()
 
     def request_move(self, source: Position, destination: Position) -> MoveResult:
         if self._game_over:
@@ -86,6 +90,8 @@ class GameEngine:
 
     def advance_time(self, ms: int) -> None:
         self._arbiter.advance_time(ms)
+        for piece, captured_by in self._arbiter.take_captures():
+            self._score.record_capture(piece, captured_by)
 
     def wait(self, ms: int) -> None:
         self.advance_time(ms)
@@ -101,3 +107,9 @@ class GameEngine:
 
     def history_entries(self) -> list[MoveRecord]:
         return self._history.entries()
+
+    def get_scores(self) -> dict[Color, int]:
+        return self._score.get_scores()
+
+    def get_captured(self, color: Color) -> list[CapturedEntry]:
+        return self._score.get_captured(color)

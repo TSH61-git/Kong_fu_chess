@@ -64,8 +64,8 @@ class RealTimeArbiter:
         return dict(self._cooldowns)
 
     def take_captures(self) -> list[tuple[Piece, Color]]:
-        # Drain and return capture events recorded since the last call
-        # (mid-route / jump-defense captures only — see _capture_motion).
+        # Drain and return every capture recorded since the last call —
+        # mid-route, jump-defense (_capture_motion), and arrival (_resolve_arrival).
         captures = self._captures
         self._captures = []
         return captures
@@ -236,8 +236,11 @@ class RealTimeArbiter:
         return motion.source
 
     def _resolve_arrival(self, motion: Motion) -> None:
-        victim = self._board.get(motion.destination)
-        if victim is not None and motion.source != motion.destination and victim.color == motion.piece.color:
+        is_hold = motion.source == motion.destination
+        # A hold/jump never "arrives" onto an occupant — the mover already
+        # is the piece sitting on that cell, so there is no victim to read.
+        victim = None if is_hold else self._board.get(motion.destination)
+        if victim is not None and victim.color == motion.piece.color:
             # A friendly piece beat us to the destination while we were mid-
             # flight (the square looked empty when this motion was accepted).
             # We can't land on our own piece, so pull up short instead of
@@ -253,9 +256,10 @@ class RealTimeArbiter:
                 self._cooldowns[land_at] = _COOLDOWN_MS
             return
         self._board.set(motion.source, None)
-        if victim is not None and victim.piece_type == PieceType.KING:
-            if self._game_engine is not None:
+        if victim is not None:
+            if victim.piece_type == PieceType.KING and self._game_engine is not None:
                 self._game_engine.notify_king_captured()
+            self._captures.append((victim, motion.piece.color))
         final_piece = _promoted(motion.piece, motion.destination.row, self._board.rows)
         self._board.set(motion.destination, final_piece)
         self._cooldowns[motion.destination] = _COOLDOWN_MS

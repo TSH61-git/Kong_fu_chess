@@ -9,7 +9,6 @@ from app_gateways.gui.img import Img
 from app_gateways.gui.animation.anim_state import AnimState
 from app_gateways.gui.animation.piece_animator import PieceAnimator
 from app_gateways.gui.renderer import Renderer
-from app_gateways.gui.score_tracker import ScoreTracker
 from app_gateways.text_cli.bootstrap import GameRuntime
 from app_gateways.gui.translator import piece_dir
 from chess_engine.model.piece import Color, PieceState
@@ -27,7 +26,6 @@ class GuiRunner:
         self._canvas   = Img()
         self._animators: dict[tuple[int, int], PieceAnimator] = {}
         self._prev_by_source: dict[tuple[int, int], Motion] = {}
-        self._score    = ScoreTracker()
         board_img      = Img()
         board_img.img  = cv2.imdecode(
             np.fromfile(str(_ASSETS_DIR / "board.png"), dtype=np.uint8),
@@ -69,19 +67,17 @@ class GuiRunner:
             )
             motions   = self._runtime.arbiter.get_active_motions()
             cooldowns = self._runtime.arbiter.get_cooldowns()
-            captures  = self._runtime.arbiter.take_captures()
 
             self._sync_animators(motions)
             self._update_animators(delta_ms)
-            self._score.update(snapshot, motions)
-            self._score.record_captures(captures)
 
             self._renderer.draw(
                 self._canvas, snapshot, self._animators, motions, cooldowns,
                 {
-                    Color.WHITE: self._score.get_captured(Color.WHITE),
-                    Color.BLACK: self._score.get_captured(Color.BLACK),
+                    Color.WHITE: self._runtime.engine.get_captured(Color.WHITE),
+                    Color.BLACK: self._runtime.engine.get_captured(Color.BLACK),
                 },
+                self._runtime.engine.get_scores(),
                 self._runtime.engine.history_entries(),
             )
 

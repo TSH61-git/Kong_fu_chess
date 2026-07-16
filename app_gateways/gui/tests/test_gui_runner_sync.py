@@ -93,10 +93,8 @@ class TestAnimatorSurvivesJumpDefenseCapture:
         for _ in range(22):  # advance past both motions resolving
             rt.engine.advance_time(50)
             motions = rt.arbiter.get_active_motions()
-            captures = rt.arbiter.take_captures()
             runner._sync_animators(motions)
             runner._update_animators(50)
-            runner._score.record_captures(captures)
 
         # the defending jumper survived on the board...
         assert board.get(Position(3, 4)) is not None
@@ -109,6 +107,6 @@ class TestAnimatorSurvivesJumpDefenseCapture:
         assert white_key not in runner._animators
 
         # the capture must be attributed to black in the score panel.
-        captured_by_black = runner._score.get_captured(Color.BLACK)
+        captured_by_black = rt.engine.get_captured(Color.BLACK)
         assert len(captured_by_black) == 1
         assert captured_by_black[0].piece.color == Color.WHITE

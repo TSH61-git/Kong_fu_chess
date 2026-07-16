@@ -12,6 +12,7 @@ def _mock_arbiter(has_active=False):
     arbiter.has_active_motion.return_value = has_active
     arbiter.is_in_cooldown.return_value = False
     arbiter.is_destination_claimed.return_value = False
+    arbiter.take_captures.return_value = []
     return arbiter
 
 
