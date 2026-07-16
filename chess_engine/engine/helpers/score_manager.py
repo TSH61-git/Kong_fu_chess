@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from chess_engine.engine.event_manager import EventManager
+from chess_engine.engine.events import PieceCaptured
 from chess_engine.model.piece import Color, Piece, PieceType
 
 _DEFAULT = 5
@@ -27,8 +29,12 @@ class CapturedEntry:
 
 
 class ScoreManager:
-    def __init__(self) -> None:
+    def __init__(self, events: EventManager) -> None:
         self._entries: list[CapturedEntry] = []
+        events.subscribe(PieceCaptured, self._on_piece_captured)
+
+    def _on_piece_captured(self, event: PieceCaptured) -> None:
+        self.record_capture(event.piece, event.captured_by)
 
     def record_capture(self, piece: Piece, captured_by: Color) -> None:
         self._entries.append(CapturedEntry(

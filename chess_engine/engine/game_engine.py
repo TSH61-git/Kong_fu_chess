@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Optional, Protocol
 
+from chess_engine.engine.event_manager import EventManager
+from chess_engine.engine.events import GameOver, MoveAccepted, PieceCaptured
 from chess_engine.engine.helpers.move_history import MoveHistory, MoveRecord
 from chess_engine.engine.helpers.score_manager import CapturedEntry, ScoreManager
 from chess_engine.engine.helpers.snapshot_helpers import build_snapshot
@@ -37,13 +39,24 @@ class IRealTimeArbiter(Protocol):
 
 
 class GameEngine:
-    def __init__(self, board: Board, rule_engine: RuleEngine, arbiter: IRealTimeArbiter) -> None:
+    def __init__(
+        self,
+        board: Board,
+        rule_engine: RuleEngine,
+        arbiter: IRealTimeArbiter,
+        events: Optional[EventManager] = None,
+    ) -> None:
         self._board = board
         self._rule_engine = rule_engine
         self._arbiter = arbiter
         self._game_over: bool = False
-        self._history = MoveHistory()
-        self._score = ScoreManager()
+        self._events = events if events is not None else EventManager()
+        self._history = MoveHistory(self._events)
+        self._score = ScoreManager(self._events)
+
+    @property
+    def events(self) -> EventManager:
+        return self._events
 
     def request_move(self, source: Position, destination: Position) -> MoveResult:
         if self._game_over:
@@ -66,7 +79,13 @@ class GameEngine:
         if moving_piece is not None:
             target = self._board.get(destination)
             is_capture = target is not None and target.color != moving_piece.color
-            self._history.record(moving_piece, source, destination, is_capture=is_capture)
+            self._events.publish(MoveAccepted(
+                color=moving_piece.color,
+                piece_type=moving_piece.piece_type,
+                source=source,
+                destination=destination,
+                is_capture=is_capture,
+            ))
         return MoveResult(is_accepted=True, reason=_OK)
 
     def validate_move(self, board: Board, source: Position, destination: Position):
@@ -85,13 +104,19 @@ class GameEngine:
         self._arbiter.start_motion(
             piece=jumping_piece, source=position, destination=position, duration_ms=1000,
         )
-        self._history.record(jumping_piece, position, position, is_capture=False)
+        self._events.publish(MoveAccepted(
+            color=jumping_piece.color,
+            piece_type=jumping_piece.piece_type,
+            source=position,
+            destination=position,
+            is_capture=False,
+        ))
         return MoveResult(is_accepted=True, reason=_OK)
 
     def advance_time(self, ms: int) -> None:
         self._arbiter.advance_time(ms)
         for piece, captured_by in self._arbiter.take_captures():
-            self._score.record_capture(piece, captured_by)
+            self._events.publish(PieceCaptured(piece=piece, captured_by=captured_by))
 
     def wait(self, ms: int) -> None:
         self.advance_time(ms)
@@ -104,6 +129,7 @@ class GameEngine:
 
     def notify_king_captured(self) -> None:
         self._game_over = True
+        self._events.publish(GameOver())
 
     def history_entries(self) -> list[MoveRecord]:
         return self._history.entries()

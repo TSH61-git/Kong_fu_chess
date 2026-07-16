@@ -4,6 +4,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from chess_engine.engine.event_manager import EventManager
+from chess_engine.engine.events import MoveAccepted
 from chess_engine.model.piece import Color, Piece, PieceType
 from chess_engine.model.position import Position
 
@@ -49,8 +51,17 @@ class MoveHistory:
     move pairs) ordered purely by when each request was accepted.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, events: EventManager) -> None:
         self._entries: list[MoveRecord] = []
+        events.subscribe(MoveAccepted, self._on_move_accepted)
+
+    def _on_move_accepted(self, event: MoveAccepted) -> None:
+        self.record(
+            Piece(event.piece_type, event.color),
+            event.source,
+            event.destination,
+            is_capture=event.is_capture,
+        )
 
     def record(
         self,
