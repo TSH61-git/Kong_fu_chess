@@ -4,6 +4,8 @@
 
 > This repository is under active development. The architecture, real-time motion model, and guard rails are intentionally designed for extensibility, clarity, and deterministic concurrency handling.
 
+![משחק Kong Fu Chess](app_gateways/gui/assets/Kong_fu_chess.png)
+
 ## PROJECT OVERVIEW
 
 Kong Fu Chess is a real-time, cooldown-driven variant of traditional chess in which actions are not gated by turns. Instead, pieces move continuously through the board as asynchronous motions, each constrained by timing, route safety, and arrival semantics. The game emphasizes immediate intent, non-blocking motion, and deterministic resolution when multiple trajectories overlap or complete at nearly the same instant.
