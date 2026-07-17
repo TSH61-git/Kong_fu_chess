@@ -16,17 +16,11 @@ class TestMoveHistoryDirectRecord:
         entries = history.entries()
         assert [e.index for e in entries] == [1, 2]
 
-    def test_display_text_includes_letter_color_and_coordinates(self):
+    def test_display_text_includes_letter_and_algebraic_destination(self):
         history = MoveHistory(EventManager())
         history.record(_WP, Position(6, 4), Position(4, 4))
 
-        assert history.entries()[0].display_text() == "P W (6,4)->(4,4)"
-
-    def test_capture_marker_appended_when_is_capture_true(self):
-        history = MoveHistory(EventManager())
-        history.record(_WP, Position(4, 4), Position(3, 4), is_capture=True)
-
-        assert history.entries()[0].display_text().endswith(" x")
+        assert history.entries()[0].display_text() == "Pe4"
 
 
 class TestMoveHistorySubscribesToEvents:

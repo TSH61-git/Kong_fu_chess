@@ -8,7 +8,7 @@ import numpy as np
 from app_gateways.gui.img import Img
 from app_gateways.gui.animation.anim_state import AnimState
 from app_gateways.gui.animation.piece_animator import PieceAnimator
-from app_gateways.gui.renderer import Renderer
+from app_gateways.gui.renderer import Renderer, TOP_BAR_H
 from app_gateways.text_cli.bootstrap import GameRuntime
 from app_gateways.gui.translator import piece_dir
 from chess_engine.model.piece import Color, PieceState
@@ -20,12 +20,45 @@ _WINDOW     = "Kong Fu Chess"
 _TARGET_FPS = 60
 
 
+def letterbox_transform(
+    native_w: int, native_h: int, window_w: int, window_h: int
+) -> tuple[float, int, int]:
+    """Uniform scale + centering offsets to fit native_w x native_h into
+    window_w x window_h while preserving aspect ratio (letterboxed)."""
+    window_w = max(1, window_w)
+    window_h = max(1, window_h)
+    scale = min(window_w / native_w, window_h / native_h)
+    scaled_w = int(native_w * scale)
+    scaled_h = int(native_h * scale)
+    offset_x = (window_w - scaled_w) // 2
+    offset_y = (window_h - scaled_h) // 2
+    return scale, offset_x, offset_y
+
+
+def window_to_native(
+    x: int, y: int,
+    scale: float, offset_x: int, offset_y: int,
+    native_w: int, native_h: int,
+) -> tuple[int | None, int | None]:
+    """Invert letterbox_transform: map a window-space point back to native
+    canvas pixel space, or (None, None) if it falls in the letterbox bars."""
+    nx = (x - offset_x) / scale
+    ny = (y - offset_y) / scale
+    if nx < 0 or ny < 0 or nx >= native_w or ny >= native_h:
+        return None, None
+    return int(nx), int(ny)
+
+
 class GuiRunner:
     def __init__(self, runtime: GameRuntime) -> None:
         self._runtime  = runtime
         self._canvas   = Img()
         self._animators: dict[tuple[int, int], PieceAnimator] = {}
         self._prev_by_source: dict[tuple[int, int], Motion] = {}
+        # Current native-canvas -> window letterbox transform, updated each
+        # frame in _present() and inverted by _on_mouse() to map clicks back.
+        self._display_scale   = 1.0
+        self._display_offset  = (0, 0)
         board_img      = Img()
         board_img.img  = cv2.imdecode(
             np.fromfile(str(_ASSETS_DIR / "board.png"), dtype=np.uint8),
@@ -40,8 +73,9 @@ class GuiRunner:
     # ------------------------------------------------------------------ public
 
     def run(self) -> None:
-        cv2.namedWindow(_WINDOW, cv2.WINDOW_AUTOSIZE)
+        cv2.namedWindow(_WINDOW, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(_WINDOW, self._on_mouse)
+        self._window_sized = False
 
         # init animators from starting board
         board = self._runtime.board
@@ -81,7 +115,12 @@ class GuiRunner:
                 self._runtime.engine.history_entries(),
             )
 
-            cv2.imshow(_WINDOW, self._canvas.img)
+            if not self._window_sized:
+                h, w = self._canvas.img.shape[:2]
+                cv2.resizeWindow(_WINDOW, w, h)
+                self._window_sized = True
+
+            self._present()
             wait = max(1, int(frame_ms - (time.perf_counter() - now) * 1000))
             if cv2.waitKey(wait) == 27:
                 break
@@ -90,9 +129,50 @@ class GuiRunner:
 
     # ----------------------------------------------------------------- private
 
+    def _present(self) -> None:
+        """Letterbox the native-resolution canvas to fit the current window
+        size ourselves, so the image handed to imshow always exactly fills
+        the window (scale-by-1 as far as the backend is concerned) — this
+        keeps the mouse callback's coordinate space unambiguous regardless
+        of how the window has been resized.
+        """
+        native_h, native_w = self._canvas.img.shape[:2]
+        try:
+            _, _, window_w, window_h = cv2.getWindowImageRect(_WINDOW)
+        except cv2.error:
+            window_w, window_h = native_w, native_h
+
+        if window_w <= 0 or window_h <= 0:
+            window_w, window_h = native_w, native_h
+
+        scale, offset_x, offset_y = letterbox_transform(
+            native_w, native_h, window_w, window_h
+        )
+        self._display_scale  = scale
+        self._display_offset = (offset_x, offset_y)
+
+        scaled_w = int(native_w * scale)
+        scaled_h = int(native_h * scale)
+        scaled = cv2.resize(self._canvas.img, (scaled_w, scaled_h), interpolation=cv2.INTER_AREA)
+
+        frame = np.zeros((window_h, window_w, self._canvas.img.shape[2]), dtype=np.uint8)
+        frame[offset_y:offset_y + scaled_h, offset_x:offset_x + scaled_w] = scaled
+
+        cv2.imshow(_WINDOW, frame)
+
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param) -> None:
-        if event == cv2.EVENT_LBUTTONDOWN:
-            self._runtime.controller.click(x, y)
+        if event != cv2.EVENT_LBUTTONDOWN:
+            return
+        if self._canvas.img is None:
+            return
+        native_h, native_w = self._canvas.img.shape[:2]
+        offset_x, offset_y = self._display_offset
+        cx, cy = window_to_native(
+            x, y, self._display_scale, offset_x, offset_y, native_w, native_h
+        )
+        if cx is None:
+            return
+        self._runtime.controller.click(cx, cy - TOP_BAR_H)
 
     def _make_animator(self, piece) -> PieceAnimator:
         return PieceAnimator(piece_dir(piece, _ASSETS_DIR), CELL_SIZE)

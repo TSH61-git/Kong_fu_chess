@@ -18,10 +18,11 @@ _PIECE_LETTERS: dict[PieceType, str] = {
     PieceType.PAWN:   "P",
 }
 
-_COLOR_TAGS: dict[Color, str] = {
-    Color.WHITE: "W",
-    Color.BLACK: "B",
-}
+def _square(pos: Position) -> str:
+    """Algebraic square name, e.g. Position(row=0, col=4) -> 'e8'."""
+    file = chr(ord("a") + pos.col)
+    rank = 8 - pos.row
+    return f"{file}{rank}"
 
 
 @dataclass(frozen=True)
@@ -36,11 +37,7 @@ class MoveRecord:
 
     def display_text(self) -> str:
         letter = _PIECE_LETTERS[self.piece_type]
-        tag    = _COLOR_TAGS[self.color]
-        src    = f"({self.source.row},{self.source.col})"
-        dst    = f"({self.destination.row},{self.destination.col})"
-        capture_marker = " x" if self.is_capture else ""
-        return f"{letter} {tag} {src}->{dst}{capture_marker}"
+        return f"{letter}{_square(self.destination)}"
 
 
 class MoveHistory:
