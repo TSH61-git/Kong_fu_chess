@@ -16,7 +16,6 @@ from chess_engine.realtime.motion import Motion
 
 _PANEL_WIDTH = 340
 
-# Player bars, drawn above (Black / Player 2) and below (White / Player 1) the board.
 TOP_BAR_H    = 64
 BOTTOM_BAR_H = 64
 _BAR_BG      = (32, 30, 28, 255)          # BGRA

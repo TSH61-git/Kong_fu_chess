@@ -13,27 +13,6 @@ class Img:
              size: tuple[int, int] | None = None,
              keep_aspect: bool = False,
              interpolation: int = cv2.INTER_AREA) -> "Img":
-        """
-        Load `path` into self.img and **optionally resize**.
-
-        Parameters
-        ----------
-        path : str | Path
-            Image file to load.
-        size : (width, height) | None
-            Target size in pixels.  If None, keep original.
-        keep_aspect : bool
-            • False  → resize exactly to `size`
-            • True   → shrink so the *longer* side fits `size` while
-                       preserving aspect ratio (no cropping).
-        interpolation : OpenCV flag
-            E.g.  `cv2.INTER_AREA` for shrink, `cv2.INTER_LINEAR` for enlarge.
-
-        Returns
-        -------
-        Img
-            `self`, so you can chain:  `sprite = Img().read("foo.png", (64,64))`
-        """
         path = str(path)
         raw = np.fromfile(path, dtype=np.uint8)
         self.img = cv2.imdecode(raw, cv2.IMREAD_UNCHANGED)

@@ -5,7 +5,8 @@ from chess_engine.model.piece import Piece, PieceType, Color
 from chess_engine.model.board import Board
 from chess_engine.model.position import Position
 
-# Maps PieceType to the single-letter folder prefix used in assets/
+PIECE_SET = "pieces_mine"
+
 _TYPE_TO_FOLDER: dict[PieceType, str] = {
     PieceType.KING:   "K",
     PieceType.QUEEN:  "Q",
@@ -26,7 +27,7 @@ def piece_to_asset_folder(piece: Piece) -> str:
     return _TYPE_TO_FOLDER[piece.piece_type] + _COLOR_TO_FOLDER[piece.color]
 
 
-def piece_dir(piece: Piece, assets_dir: pathlib.Path, piece_set: str = "pieces_mine") -> pathlib.Path:
+def piece_dir(piece: Piece, assets_dir: pathlib.Path, piece_set: str = PIECE_SET) -> pathlib.Path:
     """Return the full path to the piece's animation directory."""
     return assets_dir / piece_set / piece_to_asset_folder(piece)
 
