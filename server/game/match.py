@@ -1,12 +1,15 @@
 # MatchSession — the fixed two-slot match abstraction used through Phases 1-4.
-# No room ID, no viewer roster: those belong to game/rooms.py from Phase 5
-# onward, which generalizes this class rather than replacing it.
+# No viewer roster: that belongs to game/rooms.py from Phase 5 onward, which
+# generalizes this class rather than replacing it. Since Phase 3, many
+# MatchSessions can be alive at once (one per matchmaker pairing), so
+# room_id is a per-instance UUID, not a shared class attribute.
 from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from enum import Enum, auto
-from typing import Optional
+from typing import Callable, Optional
 
 from chess_engine.engine.events import GameOver, PieceCaptured
 from chess_engine.model.piece import Color, PieceType
@@ -33,8 +36,6 @@ class MatchStatus(Enum):
 
 
 class MatchSession:
-    room_id = "default"
-
     def __init__(
         self,
         bus: Bus,
@@ -42,17 +43,24 @@ class MatchSession:
         auth_service: AuthService,
         matches_repo: MatchesRepository,
         tick_ms: int = config.TICK_MS,
+        on_ended: Optional[Callable[["MatchSession"], None]] = None,
     ) -> None:
+        self.room_id = str(uuid.uuid4())
         self.stack: EngineStack = build_game_stack()
         self.bus = bus
         self.clock = clock
         self.auth_service = auth_service
         self._matches_repo = matches_repo
         self.tick_ms = tick_ms
+        self._on_ended = on_ended
         self.status = MatchStatus.ACTIVE
         self.white: Optional[ClientSession] = None
         self.black: Optional[ClientSession] = None
         self._winner_color: Optional[Color] = None
+        # Exposed so callers (mainly tests) can await actual completion of
+        # end()'s background work instead of sleeping a guessed duration.
+        self.teardown_task: Optional[asyncio.Task] = None
+        self.record_result_task: Optional[asyncio.Task] = None
 
         self._broadcaster = RoomBroadcaster(bus, self.room_id, self._sessions)
         EngineEventRelay(self.stack.engine, bus, self.room_id, winner_provider=self._winner_username)
@@ -72,9 +80,11 @@ class MatchSession:
         if self.white is None:
             self.white = session
             session.role = Role.WHITE
+            session.current_match = self
         elif self.black is None:
             self.black = session
             session.role = Role.BLACK
+            session.current_match = self
             self.bus.publish(
                 f"room:{self.room_id}", RoomMatchReady(
                     ts=self.clock.now(), room_id=self.room_id,
@@ -90,25 +100,42 @@ class MatchSession:
             self.white = None
         elif self.black is session:
             self.black = None
+        else:
+            return
+        session.role = None
+        session.current_match = None
 
     def end(self, reason: str) -> None:
         if self.status is MatchStatus.ENDED:
             return
         self.status = MatchStatus.ENDED
         _logger.info("Match %s ended: %s", self.room_id, reason)
+        # Snapshotted once, synchronously, and threaded into both tasks as
+        # parameters: _teardown() releases these same seats (nulling
+        # self.white/self.black), and since it has no await points it can
+        # run to completion before _record_result() ever starts — reading
+        # self.white/self.black inside _record_result() would then see None.
+        white, black = self.white, self.black
         # Scheduled rather than awaited here: this may be called from inside
         # the tick loop's own coroutine (a king-capture GameOver fires while
         # _run_tick_loop is mid-iteration), and a task cannot safely cancel
         # and await itself.
-        asyncio.create_task(self._teardown())
-        asyncio.create_task(self._record_result(reason))
+        self.teardown_task = asyncio.create_task(self._teardown(white, black))
+        self.record_result_task = asyncio.create_task(self._record_result(reason, white, black))
 
-    async def _teardown(self) -> None:
+    async def _teardown(self, white: Optional[ClientSession], black: Optional[ClientSession]) -> None:
         self._tick_task.cancel()
         self._broadcaster.close()
+        if white is not None:
+            self.release(white)
+        if black is not None:
+            self.release(black)
+        if self._on_ended is not None:
+            self._on_ended(self)
 
-    async def _record_result(self, reason: str) -> None:
-        white, black = self.white, self.black
+    async def _record_result(
+        self, reason: str, white: Optional[ClientSession], black: Optional[ClientSession],
+    ) -> None:
         # Skips silently for a guest match: either seat disconnected before
         # the game ended, or a fully passive, never-authenticated player had
         # their king captured without ever moving (pieces act independently

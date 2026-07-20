@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Optional
 
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 from server.core.bus import Bus
-from server.core.clock import RealClock
-from server.game.match import MatchSession
+from server.core.clock import Clock, FakeClock, RealClock
+from server.game.registry import MatchRegistry
+from server.matchmaking.matchmaker import Matchmaker
+from server.matchmaking.queue import MatchmakingQueue
+from server.network.context import ServerContext
 from server.network.server import handle_connection
 from server.tests.support import build_test_repos
 
@@ -19,16 +23,23 @@ from server.tests.support import build_test_repos
 _NO_TICKS_DURING_TEST_MS = 60_000
 
 
-def _new_match(tick_ms: int = _NO_TICKS_DURING_TEST_MS) -> MatchSession:
+def _new_context_and_matchmaker(clock: Optional[Clock] = None) -> tuple[ServerContext, Matchmaker]:
     auth_service, matches_repo = build_test_repos()
-    return MatchSession(
-        bus=Bus(), clock=RealClock(), auth_service=auth_service, matches_repo=matches_repo, tick_ms=tick_ms,
+    clock = clock or RealClock()
+    queue = MatchmakingQueue()
+    registry = MatchRegistry()
+    bus = Bus()
+    context = ServerContext(auth_service=auth_service, clock=clock, queue=queue)
+    matchmaker = Matchmaker(
+        queue=queue, registry=registry, bus=bus, clock=clock,
+        auth_service=auth_service, matches_repo=matches_repo, tick_ms=_NO_TICKS_DURING_TEST_MS,
     )
+    return context, matchmaker
 
 
-async def _start_test_server(match: MatchSession):
+async def _start_test_server(context: ServerContext):
     async def handler(websocket):
-        await handle_connection(websocket, match)
+        await handle_connection(websocket, context)
 
     return await serve(handler, "localhost", 0)
 
@@ -44,23 +55,27 @@ async def _recv_until(websocket, predicate, max_messages: int = 10) -> dict:
     raise AssertionError(f"no message matching predicate arrived within {max_messages} messages")
 
 
+async def _register_and_queue(ws, username: str) -> None:
+    await ws.send(json.dumps(
+        {"type": "register", "id": "r1", "data": {"username": username, "password": "pw"}},
+    ))
+    await _recv_until(ws, lambda m: m["type"] == "ack" and m.get("in_reply_to") == "r1")
+    await ws.send(json.dumps({"type": "queue_join", "id": "q1", "data": {}}))
+    await _recv_until(ws, lambda m: m.get("in_reply_to") == "q1")
+
+
 def test_two_clients_are_seated_and_notified_when_the_match_is_ready():
     async def body():
-        match = _new_match()
-        server = await _start_test_server(match)
+        context, matchmaker = _new_context_and_matchmaker()
+        server = await _start_test_server(context)
         try:
             port = server.sockets[0].getsockname()[1]
             uri = f"ws://localhost:{port}"
 
             async with connect(uri) as white_ws, connect(uri) as black_ws:
-                # A connection is unseated and unauthenticated until it
-                # registers/logs in — the "seated" notice only fires then.
-                await white_ws.send(json.dumps(
-                    {"type": "register", "id": "r1", "data": {"username": "white_player", "password": "pw"}},
-                ))
-                await black_ws.send(json.dumps(
-                    {"type": "register", "id": "r1", "data": {"username": "black_player", "password": "pw"}},
-                ))
+                await _register_and_queue(white_ws, "white_player")
+                await _register_and_queue(black_ws, "black_player")
+                await matchmaker.poll_once()
 
                 white_seated = await _recv_until(white_ws, lambda m: m["type"] == "notice" and m["event"] == "seated")
                 black_seated = await _recv_until(black_ws, lambda m: m["type"] == "notice" and m["event"] == "seated")
@@ -74,31 +89,24 @@ def test_two_clients_are_seated_and_notified_when_the_match_is_ready():
         finally:
             server.close()
             await server.wait_closed()
-            match._tick_task.cancel()
 
     asyncio.run(body())
 
 
 def test_two_clients_can_connect_and_trade_a_move():
     async def body():
-        match = _new_match()
-        server = await _start_test_server(match)
+        context, matchmaker = _new_context_and_matchmaker()
+        server = await _start_test_server(context)
         try:
             port = server.sockets[0].getsockname()[1]
             uri = f"ws://localhost:{port}"
 
             async with connect(uri) as white_ws, connect(uri) as black_ws:
-                # Moves require an authenticated, seated session as of Phase
-                # 2 — and black must also be seated, or it won't be in the
-                # room's broadcast roster to receive the move at all.
-                await white_ws.send(json.dumps(
-                    {"type": "register", "id": "r1", "data": {"username": "white_player", "password": "pw"}},
-                ))
-                await _recv_until(white_ws, lambda m: m["type"] == "ack" and m.get("in_reply_to") == "r1")
-                await black_ws.send(json.dumps(
-                    {"type": "register", "id": "r1", "data": {"username": "black_player", "password": "pw"}},
-                ))
-                await _recv_until(black_ws, lambda m: m["type"] == "ack" and m.get("in_reply_to") == "r1")
+                await _register_and_queue(white_ws, "white_player")
+                await _register_and_queue(black_ws, "black_player")
+                await matchmaker.poll_once()
+                await _recv_until(white_ws, lambda m: m.get("event") == "match_ready")
+                await _recv_until(black_ws, lambda m: m.get("event") == "match_ready")
 
                 await white_ws.send(json.dumps({"type": "move", "id": "1", "data": {"cmd": "WPe2e3"}}))
 
@@ -116,57 +124,23 @@ def test_two_clients_can_connect_and_trade_a_move():
         finally:
             server.close()
             await server.wait_closed()
-            match._tick_task.cancel()
-
-    asyncio.run(body())
-
-
-def test_a_third_authenticated_session_is_refused_a_seat():
-    # Connections are no longer refused at the transport level — a match's
-    # capacity is only enforced once a session tries to actually be seated,
-    # which now happens on a successful register/login (see auth/commands.py).
-    async def body():
-        match = _new_match()
-        server = await _start_test_server(match)
-        try:
-            port = server.sockets[0].getsockname()[1]
-            uri = f"ws://localhost:{port}"
-
-            async with connect(uri) as white_ws, connect(uri) as black_ws, connect(uri) as third_ws:
-                # Sequential and awaited: seat order must be deterministic
-                # for this test to mean anything.
-                replies = {}
-                for ws, username in ((white_ws, "p1"), (black_ws, "p2"), (third_ws, "p3")):
-                    await ws.send(json.dumps(
-                        {"type": "register", "id": "r1", "data": {"username": username, "password": "pw"}},
-                    ))
-                    replies[username] = await _recv_until(ws, lambda m: m.get("in_reply_to") == "r1")
-
-                assert replies["p1"]["type"] == "ack"
-                assert replies["p2"]["type"] == "ack"
-                assert replies["p3"]["type"] == "error"
-                assert replies["p3"]["code"] == "MATCH_FULL"
-        finally:
-            server.close()
-            await server.wait_closed()
-            match._tick_task.cancel()
 
     asyncio.run(body())
 
 
 def test_move_claiming_the_wrong_color_is_rejected():
     async def body():
-        match = _new_match()
-        server = await _start_test_server(match)
+        context, matchmaker = _new_context_and_matchmaker()
+        server = await _start_test_server(context)
         try:
             port = server.sockets[0].getsockname()[1]
             uri = f"ws://localhost:{port}"
 
-            async with connect(uri) as white_ws, connect(uri):
-                await white_ws.send(json.dumps(
-                    {"type": "register", "id": "r1", "data": {"username": "white_player", "password": "pw"}},
-                ))
-                await _recv_until(white_ws, lambda m: m["type"] == "ack" and m.get("in_reply_to") == "r1")
+            async with connect(uri) as white_ws, connect(uri) as black_ws:
+                await _register_and_queue(white_ws, "white_player")
+                await _register_and_queue(black_ws, "black_player")
+                await matchmaker.poll_once()
+                await _recv_until(white_ws, lambda m: m.get("event") == "match_ready")
 
                 await white_ws.send(json.dumps({"type": "move", "id": "1", "data": {"cmd": "BPe7e6"}}))
                 reply = await _recv_until(white_ws, lambda m: m["type"] == "error")
@@ -174,6 +148,31 @@ def test_move_claiming_the_wrong_color_is_rejected():
         finally:
             server.close()
             await server.wait_closed()
-            match._tick_task.cancel()
+
+    asyncio.run(body())
+
+
+def test_a_lone_queued_session_receives_a_queue_timeout_notice():
+    async def body():
+        clock = FakeClock()
+        context, matchmaker = _new_context_and_matchmaker(clock=clock)
+        server = await _start_test_server(context)
+        try:
+            port = server.sockets[0].getsockname()[1]
+            uri = f"ws://localhost:{port}"
+
+            async with connect(uri) as ws:
+                await _register_and_queue(ws, "lone_player")
+
+                clock.advance(61)
+                await matchmaker.poll_once()
+
+                timeout_notice = await _recv_until(
+                    ws, lambda m: m["type"] == "notice" and m["event"] == "queue_timeout",
+                )
+                assert timeout_notice["data"] == {}
+        finally:
+            server.close()
+            await server.wait_closed()
 
     asyncio.run(body())

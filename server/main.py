@@ -13,7 +13,10 @@ from server.db.connection import create_connection
 from server.db.matches_repository import MatchesRepository
 from server.db.schema import init_schema
 from server.db.users_repository import UsersRepository
-from server.game.match import MatchSession
+from server.game.registry import MatchRegistry
+from server.matchmaking.matchmaker import Matchmaker
+from server.matchmaking.queue import MatchmakingQueue
+from server.network.context import ServerContext
 from server.network.server import serve_forever
 
 
@@ -28,8 +31,21 @@ async def main() -> None:
     matches_repo = MatchesRepository(conn)
     auth_service = AuthService(users_repo)
 
-    match = MatchSession(bus=bus, clock=clock, auth_service=auth_service, matches_repo=matches_repo)
-    await serve_forever(config.HOST, config.PORT, match)
+    registry = MatchRegistry()
+    queue = MatchmakingQueue(elo_range=config.QUEUE_ELO_RANGE)
+    context = ServerContext(auth_service=auth_service, clock=clock, queue=queue)
+    matchmaker = Matchmaker(
+        queue=queue, registry=registry, bus=bus, clock=clock,
+        auth_service=auth_service, matches_repo=matches_repo,
+        poll_interval_seconds=config.QUEUE_POLL_INTERVAL_SECONDS,
+        timeout_seconds=config.QUEUE_TIMEOUT_SECONDS,
+    )
+
+    matchmaker_task = asyncio.create_task(matchmaker.run_forever())
+    try:
+        await serve_forever(config.HOST, config.PORT, context)
+    finally:
+        matchmaker_task.cancel()
 
 
 if __name__ == "__main__":

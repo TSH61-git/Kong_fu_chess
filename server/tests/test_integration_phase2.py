@@ -12,24 +12,33 @@ from chess_engine.engine.events import PieceCaptured
 from chess_engine.model.piece import Color, Piece, PieceType
 from server.core.bus import Bus
 from server.core.clock import RealClock
-from server.game.match import MatchSession
+from server.game.registry import MatchRegistry
+from server.matchmaking.matchmaker import Matchmaker
+from server.matchmaking.queue import MatchmakingQueue
+from server.network.context import ServerContext
 from server.network.server import handle_connection
 from server.tests.support import build_test_repos
 
 _NO_TICKS_DURING_TEST_MS = 60_000
 
 
-def _new_match(tick_ms: int = _NO_TICKS_DURING_TEST_MS) -> tuple[MatchSession, object]:
+def _new_context_and_matchmaker() -> tuple[ServerContext, Matchmaker, MatchRegistry]:
     auth_service, matches_repo = build_test_repos()
-    match = MatchSession(
-        bus=Bus(), clock=RealClock(), auth_service=auth_service, matches_repo=matches_repo, tick_ms=tick_ms,
+    clock = RealClock()
+    queue = MatchmakingQueue()
+    registry = MatchRegistry()
+    bus = Bus()
+    context = ServerContext(auth_service=auth_service, clock=clock, queue=queue)
+    matchmaker = Matchmaker(
+        queue=queue, registry=registry, bus=bus, clock=clock,
+        auth_service=auth_service, matches_repo=matches_repo, tick_ms=_NO_TICKS_DURING_TEST_MS,
     )
-    return match, auth_service
+    return context, matchmaker, registry
 
 
-async def _start_test_server(match: MatchSession):
+async def _start_test_server(context: ServerContext):
     async def handler(websocket):
-        await handle_connection(websocket, match)
+        await handle_connection(websocket, context)
 
     return await serve(handler, "localhost", 0)
 
@@ -42,10 +51,19 @@ async def _recv_until(websocket, predicate, max_messages: int = 10) -> dict:
     raise AssertionError(f"no message matching predicate arrived within {max_messages} messages")
 
 
+async def _register_and_queue(ws, username: str) -> None:
+    await ws.send(json.dumps(
+        {"type": "register", "id": "r1", "data": {"username": username, "password": "pw"}},
+    ))
+    await _recv_until(ws, lambda m: m["type"] == "ack" and m.get("in_reply_to") == "r1")
+    await ws.send(json.dumps({"type": "queue_join", "id": "q1", "data": {}}))
+    await _recv_until(ws, lambda m: m.get("in_reply_to") == "q1")
+
+
 def test_move_before_login_is_rejected():
     async def body():
-        match, _ = _new_match()
-        server = await _start_test_server(match)
+        context, _matchmaker, _registry = _new_context_and_matchmaker()
+        server = await _start_test_server(context)
         try:
             port = server.sockets[0].getsockname()[1]
             uri = f"ws://localhost:{port}"
@@ -57,15 +75,14 @@ def test_move_before_login_is_rejected():
         finally:
             server.close()
             await server.wait_closed()
-            match._tick_task.cancel()
 
     asyncio.run(body())
 
 
 def test_register_then_login_round_trip():
     async def body():
-        match, _ = _new_match()
-        server = await _start_test_server(match)
+        context, _matchmaker, _registry = _new_context_and_matchmaker()
+        server = await _start_test_server(context)
         try:
             port = server.sockets[0].getsockname()[1]
             uri = f"ws://localhost:{port}"
@@ -104,7 +121,6 @@ def test_register_then_login_round_trip():
         finally:
             server.close()
             await server.wait_closed()
-            match._tick_task.cancel()
 
     asyncio.run(body())
 
@@ -113,28 +129,24 @@ def test_a_king_capture_persists_a_result_and_updates_elo():
     # The real-time motion physics of an actual king capture belong to
     # Phase 1's engine tests (and server/tests/game/test_match.py's
     # TestRecordResult, which exercises this exact path against the engine
-    # directly). What Phase 2 adds is: authenticate both seats over the
-    # wire, then confirm the existing GameOver hook reaches the database.
-    # So: real websocket register + a real move (proving NOT_AUTHENTICATED
-    # lifts after login), then trigger game-over the same way the engine
-    # itself would report a king capture, and confirm the broadcast and the
-    # persisted Elo change.
+    # directly). What Phase 2 adds is: authenticate + queue_join both seats
+    # over the wire, pair them via the matchmaker, then confirm the existing
+    # GameOver hook reaches the database.
     async def body():
-        match, auth_service = _new_match()
-        server = await _start_test_server(match)
+        context, matchmaker, registry = _new_context_and_matchmaker()
+        server = await _start_test_server(context)
         try:
             port = server.sockets[0].getsockname()[1]
             uri = f"ws://localhost:{port}"
 
             async with connect(uri) as white_ws, connect(uri) as black_ws:
-                await white_ws.send(json.dumps(
-                    {"type": "register", "id": "r1", "data": {"username": "white_player", "password": "pw"}},
-                ))
-                await _recv_until(white_ws, lambda m: m.get("in_reply_to") == "r1")
-                await black_ws.send(json.dumps(
-                    {"type": "register", "id": "r1", "data": {"username": "black_player", "password": "pw"}},
-                ))
-                await _recv_until(black_ws, lambda m: m.get("in_reply_to") == "r1")
+                await _register_and_queue(white_ws, "white_player")
+                await _register_and_queue(black_ws, "black_player")
+                await matchmaker.poll_once()
+
+                match_ready = await _recv_until(white_ws, lambda m: m.get("event") == "match_ready")
+                match = registry.get(match_ready["room_id"])
+                await _recv_until(black_ws, lambda m: m.get("event") == "match_ready")
 
                 await white_ws.send(json.dumps({"type": "move", "id": "1", "data": {"cmd": "WPe2e3"}}))
                 move_ack = await _recv_until(white_ws, lambda m: m.get("in_reply_to") == "1")
@@ -146,15 +158,14 @@ def test_a_king_capture_persists_a_result_and_updates_elo():
                 match.stack.engine.notify_king_captured()
 
                 await _recv_until(white_ws, lambda m: m.get("event") == "game_over", max_messages=20)
-                await asyncio.sleep(0.05)  # let the async _record_result task finish
+                await match.record_result_task  # let the async _record_result task finish
 
-                white_user = await auth_service.users_repo.get_by_username("white_player")
-                black_user = await auth_service.users_repo.get_by_username("black_player")
+                white_user = await context.auth_service.users_repo.get_by_username("white_player")
+                black_user = await context.auth_service.users_repo.get_by_username("black_player")
                 assert white_user.elo < 1200
                 assert black_user.elo > 1200
         finally:
             server.close()
             await server.wait_closed()
-            match._tick_task.cancel()
 
     asyncio.run(body())

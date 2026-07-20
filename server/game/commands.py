@@ -15,32 +15,32 @@ from server.core.protocol import (
     encode_error,
     error_code_for_engine_reason,
 )
-from server.game.match import MatchSession
+from server.network.context import ServerContext
 from server.network.session import ClientSession, Role
 
 _ROLE_TO_COLOR: dict[Role, Color] = {Role.WHITE: Color.WHITE, Role.BLACK: Color.BLACK}
 
 
-async def handle_move(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
-    return _handle_move_or_jump(session, envelope, match, is_jump=False)
+async def handle_move(session: ClientSession, envelope: Envelope, context: ServerContext) -> str:
+    return _handle_move_or_jump(session, envelope, is_jump=False)
 
 
-async def handle_jump(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
-    return _handle_move_or_jump(session, envelope, match, is_jump=True)
+async def handle_jump(session: ClientSession, envelope: Envelope, context: ServerContext) -> str:
+    return _handle_move_or_jump(session, envelope, is_jump=True)
 
 
-async def handle_ping(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
+async def handle_ping(session: ClientSession, envelope: Envelope, context: ServerContext) -> str:
     return encode_ack(envelope.id)
 
 
-def _handle_move_or_jump(
-    session: ClientSession, envelope: Envelope, match: MatchSession, is_jump: bool,
-) -> str:
+def _handle_move_or_jump(session: ClientSession, envelope: Envelope, is_jump: bool) -> str:
     # Checked first, unconditionally, before parsing or touching the board —
     # an unseated session (never authenticated, or authenticated but never
     # successfully seated) has nothing else worth validating yet.
     if session.role is None:
         return encode_error(envelope.id, ErrorCode.NOT_AUTHENTICATED, "login or register before making a move")
+
+    match = session.current_match
 
     raw_command = envelope.data.get("cmd", "")
     try:

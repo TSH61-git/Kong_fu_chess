@@ -1,6 +1,7 @@
 import asyncio
 
 from server.core.bus import Bus
+from server.tests.support import wait_until
 
 
 def test_publish_delivers_to_subscriber():
@@ -13,7 +14,7 @@ def test_publish_delivers_to_subscriber():
 
         bus.subscribe("topic", handler)
         bus.publish("topic", "hello")
-        await asyncio.sleep(0.01)
+        await wait_until(lambda: received == ["hello"])
         assert received == ["hello"]
 
     asyncio.run(body())
@@ -30,7 +31,7 @@ def test_delivery_order_is_fifo_per_subscriber():
         bus.subscribe("topic", handler)
         for i in range(5):
             bus.publish("topic", i)
-        await asyncio.sleep(0.05)
+        await wait_until(lambda: len(received) >= 5)
         assert received == [0, 1, 2, 3, 4]
 
     asyncio.run(body())
@@ -51,7 +52,8 @@ def test_unsubscribe_stops_further_delivery():
         unsubscribe = bus.subscribe("topic", handler)
         unsubscribe()
         bus.publish("topic", "should not arrive")
-        await asyncio.sleep(0.05)
+        for _ in range(5):
+            await asyncio.sleep(0)
         assert received == []
 
     asyncio.run(body())
@@ -70,7 +72,7 @@ def test_subscriber_exception_does_not_kill_the_consumer_loop():
         bus.subscribe("topic", sometimes_failing_handler)
         bus.publish("topic", "boom")
         bus.publish("topic", "after")
-        await asyncio.sleep(0.05)
+        await wait_until(lambda: received == ["after"])
         assert received == ["after"]
 
     asyncio.run(body())
@@ -108,11 +110,12 @@ def test_full_queue_drops_the_event_instead_of_blocking():
 
         bus.subscribe("topic", handler, maxsize=1)
         bus.publish("topic", "block")
-        await asyncio.sleep(0.01)  # let the consumer task pick "block" up
+        for _ in range(5):
+            await asyncio.sleep(0)  # let the consumer task pick "block" up
         bus.publish("topic", "fills-queue")
         bus.publish("topic", "dropped")  # queue already full -> silently dropped
         release.set()
-        await asyncio.sleep(0.05)
+        await wait_until(lambda: received == ["fills-queue"])
         assert received == ["fills-queue"]
 
     asyncio.run(body())

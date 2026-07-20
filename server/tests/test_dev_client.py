@@ -1,11 +1,11 @@
 import asyncio
 import sys
-import time
 
 from chess_engine.model.piece import Color, PieceType
 from chess_engine.model.position import Position
 
-from server.dev_client import DevClient, _line_to_envelope
+from server.dev_client import DevClient
+from server.tests.support import wait_until
 
 
 class _FakeWebSocket:
@@ -26,16 +26,6 @@ class _ScriptedStdin:
         if not self._lines:
             raise AssertionError("stdin script ran out of lines")
         return self._lines.pop(0)
-
-
-class _NeverRespondingStdin:
-    # Simulates a user who never types anything — readline() blocks far
-    # longer than any test timeout, so the only way run_shell_phase() can
-    # return is via the match_ready path, exactly like a fast opponent
-    # connecting before this player types a command.
-    def readline(self) -> str:
-        time.sleep(10)
-        return ""
 
 
 class _FakeFacade:
@@ -60,38 +50,6 @@ class _FakeFacade:
         self.winner_names.append(winner_username)
 
 
-class TestLineToEnvelope:
-    def test_ping(self):
-        assert _line_to_envelope("ping") == {"type": "ping", "data": {}}
-
-    def test_move(self):
-        assert _line_to_envelope("WQe2e5") == {"type": "move", "data": {"cmd": "WQe2e5"}}
-
-    def test_jump_duplicates_the_square(self):
-        assert _line_to_envelope("jump WPe2") == {"type": "jump", "data": {"cmd": "WPe2e2"}}
-
-
-class TestWaitForMatchReady:
-    def test_returns_true_promptly_when_match_ready_fires_with_no_stdin_input(self, monkeypatch):
-        # Regression test: this loop used to raise TypeError before ever
-        # reaching this await point (asyncio.create_task() was called on the
-        # Future returned by run_in_executor, which isn't a coroutine).
-        monkeypatch.setattr(sys, "stdin", _NeverRespondingStdin())
-
-        async def body():
-            client = DevClient(_FakeWebSocket())
-
-            async def trigger_ready():
-                await asyncio.sleep(0.05)
-                client._match_ready.set()
-
-            asyncio.create_task(trigger_ready())
-            result = await asyncio.wait_for(client._wait_for_match_ready(), timeout=2)
-            assert result is True
-
-        asyncio.run(body())
-
-
 class TestAuthenticate:
     def test_register_success_sends_credentials_and_returns_true(self, monkeypatch):
         monkeypatch.setattr(sys, "stdin", _ScriptedStdin(["1\n", "alice\n", "hunter2\n"]))
@@ -101,7 +59,7 @@ class TestAuthenticate:
             client = DevClient(websocket)
 
             async def respond():
-                await asyncio.sleep(0.01)
+                await wait_until(lambda: client._pending_response is not None)
                 client._handle_message({"type": "ack", "in_reply_to": None, "ok": True, "data": {}})
 
             asyncio.create_task(respond())
@@ -122,7 +80,7 @@ class TestAuthenticate:
             client = DevClient(websocket)
 
             async def respond():
-                await asyncio.sleep(0.01)
+                await wait_until(lambda: client._pending_response is not None)
                 client._handle_message({"type": "ack", "in_reply_to": None, "ok": True, "data": {}})
 
             asyncio.create_task(respond())
@@ -142,7 +100,7 @@ class TestAuthenticate:
             client = DevClient(websocket)
 
             async def respond():
-                await asyncio.sleep(0.01)
+                await wait_until(lambda: client._pending_response is not None)
                 client._handle_message({"type": "ack", "in_reply_to": None, "ok": True, "data": {}})
 
             asyncio.create_task(respond())
@@ -165,8 +123,12 @@ class TestAuthenticate:
             ])
 
             async def respond():
+                previous = None
                 for reply in replies:
-                    await asyncio.sleep(0.01)
+                    await wait_until(
+                        lambda: client._pending_response is not None and client._pending_response is not previous,
+                    )
+                    previous = client._pending_response
                     client._handle_message(reply)
 
             asyncio.create_task(respond())

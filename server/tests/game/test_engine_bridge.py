@@ -8,6 +8,7 @@ from server.core.bus import Bus
 from server.game.engine_bridge import EngineEventRelay, RoomBroadcaster, _encode_room_event
 from server.game.engine_factory import build_game_stack
 from server.game.events import RoomGameOver, RoomMatchReady, RoomMoveAccepted, RoomStateTick
+from server.tests.support import wait_until
 
 
 class _RecordingSession:
@@ -32,7 +33,7 @@ def test_engine_event_relay_republishes_move_accepted_onto_the_bus():
 
         result = stack.engine.request_move(Position(6, 4), Position(5, 4))
         assert result.is_accepted
-        await asyncio.sleep(0.01)
+        await wait_until(lambda: len(received) >= 1)
 
         assert len(received) == 1
         event = received[0]
@@ -56,7 +57,7 @@ def test_engine_event_relay_republishes_game_over():
 
         bus.subscribe("room:test-room", handler)
         stack.engine.notify_king_captured()
-        await asyncio.sleep(0.01)
+        await wait_until(lambda: any(isinstance(event, RoomGameOver) for event in received))
 
         assert any(isinstance(event, RoomGameOver) for event in received)
 
@@ -73,7 +74,7 @@ def test_room_broadcaster_forwards_encoded_messages_to_current_sessions():
 
         result = stack.engine.request_move(Position(6, 4), Position(5, 4))
         assert result.is_accepted
-        await asyncio.sleep(0.01)
+        await wait_until(lambda: len(session.sent) >= 1)
 
         assert len(session.sent) == 1
         assert '"event": "move_accepted"' in session.sent[0]
@@ -117,7 +118,8 @@ def test_room_broadcaster_close_stops_forwarding():
         broadcaster.close()
 
         stack.engine.request_move(Position(6, 4), Position(5, 4))
-        await asyncio.sleep(0.01)
+        for _ in range(5):
+            await asyncio.sleep(0)  # give any (unsubscribed) consumer task a chance to run
 
         assert session.sent == []
 

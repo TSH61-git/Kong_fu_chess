@@ -28,6 +28,9 @@ class ErrorCode(Enum):
     USERNAME_TAKEN = "USERNAME_TAKEN"
     INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
     MATCH_FULL = "MATCH_FULL"
+    ALREADY_IN_MATCH = "ALREADY_IN_MATCH"
+    ALREADY_QUEUED = "ALREADY_QUEUED"
+    NOT_QUEUED = "NOT_QUEUED"
 
 
 # chess_engine's MoveResult.reason / MoveValidation.reason strings, confirmed

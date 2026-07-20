@@ -9,7 +9,7 @@ from server.core.clock import FakeClock
 from server.game.events import RoomMatchReady, RoomStateTick
 from server.game.match import MatchSession, MatchStatus
 from server.network.session import ClientSession, Role
-from server.tests.support import build_test_repos
+from server.tests.support import build_test_repos, wait_until
 
 
 class _FakeWebSocket:
@@ -89,7 +89,7 @@ class TestTrySeat:
                 match.try_seat(_unseated_session("s1"))
                 assert received == []  # not ready with only one seat filled
                 match.try_seat(_unseated_session("s2"))
-                await asyncio.sleep(0.01)
+                await wait_until(lambda: any(isinstance(event, RoomMatchReady) for event in received))
                 assert any(isinstance(event, RoomMatchReady) for event in received)
             finally:
                 match._tick_task.cancel()
@@ -129,7 +129,8 @@ class TestEnd:
             match = _new_match()
             match.end(reason="king_captured")
             match.end(reason="king_captured")
-            await asyncio.sleep(0.01)
+            await match.teardown_task
+            await match.record_result_task
             assert match.status is MatchStatus.ENDED
 
         _run(body)
@@ -138,7 +139,8 @@ class TestEnd:
         async def body():
             match = _new_match()
             match.stack.engine.notify_king_captured()
-            await asyncio.sleep(0.01)
+            await match.teardown_task
+            await match.record_result_task
             assert match.status is MatchStatus.ENDED
 
         _run(body)
@@ -147,7 +149,8 @@ class TestEnd:
         async def body():
             match = _new_match(tick_ms=5)
             match.end(reason="king_captured")
-            await asyncio.sleep(0.05)
+            await match.teardown_task
+            await wait_until(lambda: match._tick_task.done())
             assert match._tick_task.done()
 
         _run(body)
@@ -178,7 +181,7 @@ class TestRecordResult:
                     PieceCaptured(piece=Piece(PieceType.KING, Color.WHITE), captured_by=Color.BLACK),
                 )
                 match.stack.engine.notify_king_captured()
-                await asyncio.sleep(0.01)
+                await match.record_result_task
 
                 white_user = await match.auth_service.users_repo.get_by_id(white.user_id)
                 black_user = await match.auth_service.users_repo.get_by_id(black.user_id)
@@ -196,7 +199,7 @@ class TestRecordResult:
                 match.try_seat(_unseated_session("s1"))  # no user_id set
                 match.try_seat(_unseated_session("s2"))
                 match.stack.engine.notify_king_captured()
-                await asyncio.sleep(0.01)
+                await match.record_result_task
                 # Nothing to assert on the DB beyond "this didn't raise" —
                 # _record_result must no-op, not crash, for a guest match.
                 assert match.status is MatchStatus.ENDED
@@ -212,7 +215,7 @@ class TestRecordResult:
                 white, black = await self._seat_authenticated_players(match)
                 match.release(white)
                 match.stack.engine.notify_king_captured()
-                await asyncio.sleep(0.01)
+                await match.record_result_task
                 black_user = await match.auth_service.users_repo.get_by_id(black.user_id)
                 assert black_user.elo == 1200  # untouched: recording was skipped
             finally:
@@ -232,9 +235,9 @@ class TestTickLoop:
 
             match = _new_match(bus=bus, tick_ms=5)
             bus.subscribe(f"room:{match.room_id}", handler)
-            await asyncio.sleep(0.05)
+            await wait_until(lambda: len(received) > 0)
             match.end(reason="test cleanup")
-            await asyncio.sleep(0.01)
+            await match.teardown_task
             assert len(received) > 0
 
         _run(body)
@@ -250,9 +253,13 @@ class TestTickLoop:
             match = _new_match(bus=bus, tick_ms=5)
             bus.subscribe(f"room:{match.room_id}", handler)
             match.stack.engine.request_move(Position(6, 4), Position(5, 4))
-            await asyncio.sleep(0.05)
+            await wait_until(
+                lambda: any(
+                    isinstance(e, RoomStateTick) and e.active_motions for e in received
+                ),
+            )
             match.end(reason="test cleanup")
-            await asyncio.sleep(0.01)
+            await match.teardown_task
 
             ticks = [e for e in received if isinstance(e, RoomStateTick)]
             assert ticks
