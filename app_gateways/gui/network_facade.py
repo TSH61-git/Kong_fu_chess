@@ -42,6 +42,8 @@ class NetworkGameFacade:
         self._motions: list[Motion] = []
         self._cooldowns: dict[Position, int] = {}
         self._game_over = False
+        self._player_names: dict[Color, str] = {}
+        self._winner_name: Optional[str] = None
         self._events = EventManager()
         self._history = MoveHistory(self._events)
         self._score = ScoreManager(self._events)
@@ -77,8 +79,12 @@ class NetworkGameFacade:
     def apply_piece_captured(self, piece_type: PieceType, piece_color: Color, captured_by: Color) -> None:
         self._events.publish(PieceCaptured(piece=Piece(piece_type, piece_color), captured_by=captured_by))
 
-    def apply_game_over(self) -> None:
+    def apply_match_ready(self, white_username: str, black_username: str) -> None:
+        self._player_names = {Color.WHITE: white_username, Color.BLACK: black_username}
+
+    def apply_game_over(self, winner_username: Optional[str] = None) -> None:
         self._game_over = True
+        self._winner_name = winner_username
 
     # --------------------------------------------------- outbound: GuiRunner -> facade
 
@@ -102,6 +108,12 @@ class NetworkGameFacade:
 
     def history_entries(self) -> list[MoveRecord]:
         return self._history.entries()
+
+    def get_player_names(self) -> dict[Color, str]:
+        return self._player_names
+
+    def get_winner_name(self) -> Optional[str]:
+        return self._winner_name
 
     # --------------------------------------------------- IGameEngine Protocol: Controller -> facade
 

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import time
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Optional
 
 from chess_engine.engine.events import GameOver, MoveAccepted, PieceCaptured
 from chess_engine.engine.game_engine import GameEngine
@@ -28,9 +28,13 @@ class EngineEventRelay:
     # "subscribe a helper at construction" convention already used inside
     # chess_engine.engine.game_engine.GameEngine.
 
-    def __init__(self, engine: GameEngine, bus: Bus, room_id: str) -> None:
+    def __init__(
+        self, engine: GameEngine, bus: Bus, room_id: str,
+        winner_provider: Callable[[], Optional[str]] = lambda: None,
+    ) -> None:
         self._bus = bus
         self._room_id = room_id
+        self._winner_provider = winner_provider
         engine.events.subscribe(MoveAccepted, self._on_move_accepted)
         engine.events.subscribe(PieceCaptured, self._on_piece_captured)
         engine.events.subscribe(GameOver, self._on_game_over)
@@ -51,7 +55,10 @@ class EngineEventRelay:
         ))
 
     def _on_game_over(self, _event: GameOver) -> None:
-        self._publish(RoomGameOver(ts=time.time(), room_id=self._room_id, reason="king_captured"))
+        self._publish(RoomGameOver(
+            ts=time.time(), room_id=self._room_id, reason="king_captured",
+            winner_username=self._winner_provider(),
+        ))
 
     def _publish(self, event: object) -> None:
         self._bus.publish(f"room:{self._room_id}", event)
@@ -93,7 +100,7 @@ def _encode_piece_captured(event: RoomPieceCaptured) -> tuple[str, dict]:
 
 
 def _encode_game_over(event: RoomGameOver) -> tuple[str, dict]:
-    return "game_over", {"reason": event.reason}
+    return "game_over", {"reason": event.reason, "winner_username": event.winner_username}
 
 
 def _encode_state_tick(event: RoomStateTick) -> tuple[str, dict]:
@@ -105,8 +112,8 @@ def _encode_state_tick(event: RoomStateTick) -> tuple[str, dict]:
     }
 
 
-def _encode_match_ready(_event: RoomMatchReady) -> tuple[str, dict]:
-    return "match_ready", {}
+def _encode_match_ready(event: RoomMatchReady) -> tuple[str, dict]:
+    return "match_ready", {"white_username": event.white_username, "black_username": event.black_username}
 
 
 _ENCODERS: dict[type, Callable[[object], tuple[str, dict]]] = {

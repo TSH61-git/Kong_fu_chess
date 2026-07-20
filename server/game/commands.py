@@ -21,21 +21,27 @@ from server.network.session import ClientSession, Role
 _ROLE_TO_COLOR: dict[Role, Color] = {Role.WHITE: Color.WHITE, Role.BLACK: Color.BLACK}
 
 
-def handle_move(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
+async def handle_move(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
     return _handle_move_or_jump(session, envelope, match, is_jump=False)
 
 
-def handle_jump(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
+async def handle_jump(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
     return _handle_move_or_jump(session, envelope, match, is_jump=True)
 
 
-def handle_ping(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
+async def handle_ping(session: ClientSession, envelope: Envelope, match: MatchSession) -> str:
     return encode_ack(envelope.id)
 
 
 def _handle_move_or_jump(
     session: ClientSession, envelope: Envelope, match: MatchSession, is_jump: bool,
 ) -> str:
+    # Checked first, unconditionally, before parsing or touching the board —
+    # an unseated session (never authenticated, or authenticated but never
+    # successfully seated) has nothing else worth validating yet.
+    if session.role is None:
+        return encode_error(envelope.id, ErrorCode.NOT_AUTHENTICATED, "login or register before making a move")
+
     raw_command = envelope.data.get("cmd", "")
     try:
         parsed = parse_move_command(raw_command)

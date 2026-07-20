@@ -24,6 +24,10 @@ class ErrorCode(Enum):
     NOT_YOUR_COLOR = "NOT_YOUR_COLOR"
     VIEWER_READ_ONLY = "VIEWER_READ_ONLY"
     ROOM_NOT_READY = "ROOM_NOT_READY"
+    NOT_AUTHENTICATED = "NOT_AUTHENTICATED"
+    USERNAME_TAKEN = "USERNAME_TAKEN"
+    INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
+    MATCH_FULL = "MATCH_FULL"
 
 
 # chess_engine's MoveResult.reason / MoveValidation.reason strings, confirmed

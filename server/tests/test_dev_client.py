@@ -16,6 +16,18 @@ class _FakeWebSocket:
         self.sent.append(message)
 
 
+class _ScriptedStdin:
+    # Feeds queued lines one readline() call at a time; raises if the script
+    # runs dry, so a test can't silently hang on a real blocking read.
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = list(lines)
+
+    def readline(self) -> str:
+        if not self._lines:
+            raise AssertionError("stdin script ran out of lines")
+        return self._lines.pop(0)
+
+
 class _NeverRespondingStdin:
     # Simulates a user who never types anything — readline() blocks far
     # longer than any test timeout, so the only way run_shell_phase() can
@@ -32,6 +44,7 @@ class _FakeFacade:
         self.moves_accepted: list[tuple] = []
         self.pieces_captured: list[tuple] = []
         self.game_over_calls = 0
+        self.winner_names: list = []
 
     def apply_state_tick(self, board_grid, active_motions, cooldowns, game_over) -> None:
         self.state_ticks.append((board_grid, active_motions, cooldowns, game_over))
@@ -42,8 +55,9 @@ class _FakeFacade:
     def apply_piece_captured(self, piece_type, piece_color, captured_by) -> None:
         self.pieces_captured.append((piece_type, piece_color, captured_by))
 
-    def apply_game_over(self) -> None:
+    def apply_game_over(self, winner_username=None) -> None:
         self.game_over_calls += 1
+        self.winner_names.append(winner_username)
 
 
 class TestLineToEnvelope:
@@ -57,11 +71,11 @@ class TestLineToEnvelope:
         assert _line_to_envelope("jump WPe2") == {"type": "jump", "data": {"cmd": "WPe2e2"}}
 
 
-class TestRunShellPhase:
+class TestWaitForMatchReady:
     def test_returns_true_promptly_when_match_ready_fires_with_no_stdin_input(self, monkeypatch):
-        # Regression test: run_shell_phase() used to raise TypeError before
-        # ever reaching this await point (asyncio.create_task() was called
-        # on the Future returned by run_in_executor, which isn't a coroutine).
+        # Regression test: this loop used to raise TypeError before ever
+        # reaching this await point (asyncio.create_task() was called on the
+        # Future returned by run_in_executor, which isn't a coroutine).
         monkeypatch.setattr(sys, "stdin", _NeverRespondingStdin())
 
         async def body():
@@ -72,8 +86,102 @@ class TestRunShellPhase:
                 client._match_ready.set()
 
             asyncio.create_task(trigger_ready())
-            result = await asyncio.wait_for(client.run_shell_phase(), timeout=2)
+            result = await asyncio.wait_for(client._wait_for_match_ready(), timeout=2)
             assert result is True
+
+        asyncio.run(body())
+
+
+class TestAuthenticate:
+    def test_register_success_sends_credentials_and_returns_true(self, monkeypatch):
+        monkeypatch.setattr(sys, "stdin", _ScriptedStdin(["1\n", "alice\n", "hunter2\n"]))
+
+        async def body():
+            websocket = _FakeWebSocket()
+            client = DevClient(websocket)
+
+            async def respond():
+                await asyncio.sleep(0.01)
+                client._handle_message({"type": "ack", "in_reply_to": None, "ok": True, "data": {}})
+
+            asyncio.create_task(respond())
+            result = await asyncio.wait_for(client._authenticate(), timeout=2)
+            assert result is True
+
+            import json as _json
+            sent = _json.loads(websocket.sent[0])
+            assert sent == {"type": "register", "data": {"username": "alice", "password": "hunter2"}}
+
+        asyncio.run(body())
+
+    def test_login_success_sends_the_login_command_type(self, monkeypatch):
+        monkeypatch.setattr(sys, "stdin", _ScriptedStdin(["2\n", "bob\n", "pw\n"]))
+
+        async def body():
+            websocket = _FakeWebSocket()
+            client = DevClient(websocket)
+
+            async def respond():
+                await asyncio.sleep(0.01)
+                client._handle_message({"type": "ack", "in_reply_to": None, "ok": True, "data": {}})
+
+            asyncio.create_task(respond())
+            result = await asyncio.wait_for(client._authenticate(), timeout=2)
+            assert result is True
+            import json as _json
+            sent = _json.loads(websocket.sent[0])
+            assert sent == {"type": "login", "data": {"username": "bob", "password": "pw"}}
+
+        asyncio.run(body())
+
+    def test_invalid_choice_reprompts(self, monkeypatch):
+        monkeypatch.setattr(sys, "stdin", _ScriptedStdin(["9\n", "1\n", "alice\n", "hunter2\n"]))
+
+        async def body():
+            websocket = _FakeWebSocket()
+            client = DevClient(websocket)
+
+            async def respond():
+                await asyncio.sleep(0.01)
+                client._handle_message({"type": "ack", "in_reply_to": None, "ok": True, "data": {}})
+
+            asyncio.create_task(respond())
+            result = await asyncio.wait_for(client._authenticate(), timeout=2)
+            assert result is True
+
+        asyncio.run(body())
+
+    def test_error_reply_reprompts_instead_of_giving_up(self, monkeypatch):
+        monkeypatch.setattr(
+            sys, "stdin", _ScriptedStdin(["1\n", "alice\n", "hunter2\n", "1\n", "bob\n", "hunter2\n"]),
+        )
+
+        async def body():
+            websocket = _FakeWebSocket()
+            client = DevClient(websocket)
+            replies = iter([
+                {"type": "error", "code": "USERNAME_TAKEN", "message": "taken"},
+                {"type": "ack", "in_reply_to": None, "ok": True, "data": {}},
+            ])
+
+            async def respond():
+                for reply in replies:
+                    await asyncio.sleep(0.01)
+                    client._handle_message(reply)
+
+            asyncio.create_task(respond())
+            result = await asyncio.wait_for(client._authenticate(), timeout=2)
+            assert result is True
+
+        asyncio.run(body())
+
+    def test_stdin_closing_mid_prompt_returns_false(self, monkeypatch):
+        monkeypatch.setattr(sys, "stdin", _ScriptedStdin(["1\n", ""]))  # EOF after the menu choice
+
+        async def body():
+            client = DevClient(_FakeWebSocket())
+            result = await asyncio.wait_for(client._authenticate(), timeout=2)
+            assert result is False
 
         asyncio.run(body())
 
@@ -84,11 +192,15 @@ class TestHandleMessage:
         client._handle_message({"type": "notice", "event": "seated", "data": {"role": "white"}})
         assert "WHITE" in capsys.readouterr().out
 
-    def test_match_ready_broadcast_sets_the_event(self):
+    def test_match_ready_broadcast_sets_the_event_and_stores_names(self):
         client = DevClient(_FakeWebSocket())
         assert not client._match_ready.is_set()
-        client._handle_message({"type": "broadcast", "event": "match_ready", "data": {}})
+        client._handle_message({
+            "type": "broadcast", "event": "match_ready",
+            "data": {"white_username": "alice", "black_username": "bob"},
+        })
         assert client._match_ready.is_set()
+        assert client._player_names == ("alice", "bob")
 
     def test_error_is_printed(self, capsys):
         client = DevClient(_FakeWebSocket())
@@ -140,8 +252,12 @@ class TestHandleMessage:
         assert piece_color == Color.BLACK
         assert captured_by == Color.WHITE
 
-    def test_game_over_is_forwarded(self):
+    def test_game_over_is_forwarded_with_the_winner_name(self):
         client = DevClient(_FakeWebSocket())
         client._facade = _FakeFacade()
-        client._handle_message({"type": "broadcast", "event": "game_over", "data": {"reason": "king_captured"}})
+        client._handle_message({
+            "type": "broadcast", "event": "game_over",
+            "data": {"reason": "king_captured", "winner_username": "alice"},
+        })
         assert client._facade.game_over_calls == 1
+        assert client._facade.winner_names == ["alice"]

@@ -43,9 +43,23 @@ class DevClient:
         self._board = Board(rows=8, cols=8)
         self._facade = None
         self._match_ready = asyncio.Event()
+        self._pending_response: asyncio.Future | None = None
+        self._player_names: tuple[str, str] | None = None
 
     async def _send_envelope(self, envelope: dict) -> None:
         await self._websocket.send(json.dumps(envelope))
+
+    async def _send_and_wait(self, envelope: dict) -> dict:
+        # Only the auth step needs a request/response round trip (to decide
+        # whether to prompt again) — everything else here is fire-and-forget,
+        # with replies just printed as they arrive in _handle_message.
+        loop = asyncio.get_running_loop()
+        self._pending_response = loop.create_future()
+        await self._send_envelope(envelope)
+        try:
+            return await self._pending_response
+        finally:
+            self._pending_response = None
 
     async def receive_loop(self) -> None:
         async for raw_message in self._websocket:
@@ -56,17 +70,26 @@ class DevClient:
         event = message.get("event")
         data = message.get("data", {})
 
+        if message_type in ("ack", "error") and self._pending_response is not None:
+            if not self._pending_response.done():
+                self._pending_response.set_result(message)
+            return
+
         if message_type == "notice" and event == "seated":
             print(f"Seated as {data['role'].upper()}.")
             return
         if message_type == "broadcast" and event == "match_ready":
+            self._player_names = (data["white_username"], data["black_username"])
             self._match_ready.set()
             return
         if message_type == "error":
             print(f"< error: {message.get('code')} {message.get('message', '')}".rstrip())
             return
         if message_type == "ack":
-            print("< ok")
+            if data:
+                print(f"< ok {data}")
+            else:
+                print("< ok")
             return
 
         if self._facade is None:
@@ -91,13 +114,69 @@ class DevClient:
                 Color[data["captured_by"].upper()],
             )
         elif event == "game_over":
-            self._facade.apply_game_over()
+            self._facade.apply_game_over(data.get("winner_username"))
+
+    async def _read_line(self) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, sys.stdin.readline)
+
+    async def _authenticate(self) -> bool:
+        """Prompts Register vs Login, collects credentials, and retries on
+        failure. Returns False only if stdin closes (e.g. piped input ran
+        out) before authentication succeeds."""
+        while True:
+            print("Choose an option: [1] Register  [2] Login")
+            choice_line = await self._read_line()
+            if not choice_line:
+                return False
+            choice = choice_line.strip()
+            if choice not in ("1", "2"):
+                print("Please enter 1 or 2.")
+                continue
+            command_type = "register" if choice == "1" else "login"
+
+            print("Username:")
+            username_line = await self._read_line()
+            if not username_line:
+                return False
+            username = username_line.strip()
+
+            print("Password:")
+            password_line = await self._read_line()
+            if not password_line:
+                return False
+            password = password_line.strip()
+
+            if not username or not password:
+                print("Username and password are required.")
+                continue
+
+            reply = await self._send_and_wait(
+                {"type": command_type, "data": {"username": username, "password": password}},
+            )
+            if reply.get("type") == "ack":
+                verb = "Registered" if command_type == "register" else "Logged in"
+                print(f"{verb} as {username}.")
+                return True
+            print(f"< error: {reply.get('code')} {reply.get('message', '')}".rstrip())
 
     async def run_shell_phase(self) -> bool:
+        """Authenticates, then reads shell commands until the match is ready
+        or stdin closes. Returns True if it exited because the match became
+        ready."""
+        print("Connected.")
+        if not await self._authenticate():
+            return False
+        if self._match_ready.is_set():
+            return True
+
+        print("Type a move like 'WQe2e5', 'jump WPe2', or 'ping'.")
+        print("Waiting for an opponent - the game window opens once both players are seated.")
+        return await self._wait_for_match_ready()
+
+    async def _wait_for_match_ready(self) -> bool:
         """Reads shell commands until the match is ready or stdin closes.
         Returns True if it exited because the match became ready."""
-        print("Connected. Type a move like 'WQe2e5', 'jump WPe2', or 'ping'.")
-        print("Waiting for an opponent - the game window opens once both players are seated.")
         loop = asyncio.get_running_loop()
         while not self._match_ready.is_set():
             read_future = loop.run_in_executor(None, sys.stdin.readline)
@@ -118,6 +197,8 @@ class DevClient:
     async def run_gui_phase(self) -> None:
         runtime = build_network_runtime(self._board, self._send_envelope)
         self._facade = runtime.engine
+        if self._player_names is not None:
+            self._facade.apply_match_ready(*self._player_names)
         print("Match ready - opening the game window.")
         await GuiRunner(runtime).run()
 

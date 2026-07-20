@@ -54,7 +54,10 @@ class Renderer:
         captured: dict,
         scores: dict,
         history: list,
+        player_names: dict | None = None,
+        winner_name: str | None = None,
     ) -> None:
+        names      = player_names or _PLAYER_NAME
         cs         = self._cell_size
         board_px_w = snapshot.board_width  * cs
         board_px_h = snapshot.board_height * cs
@@ -66,11 +69,11 @@ class Renderer:
 
         self._draw_player_bar(
             canvas, 0, 0, board_px_w, TOP_BAR_H,
-            color=Color.BLACK, score=scores[Color.BLACK], captured=captured[Color.BLACK],
+            color=Color.BLACK, name=names[Color.BLACK], score=scores[Color.BLACK], captured=captured[Color.BLACK],
         )
         self._draw_player_bar(
             canvas, 0, TOP_BAR_H + board_px_h, board_px_w, BOTTOM_BAR_H,
-            color=Color.WHITE, score=scores[Color.WHITE], captured=captured[Color.WHITE],
+            color=Color.WHITE, name=names[Color.WHITE], score=scores[Color.WHITE], captured=captured[Color.WHITE],
         )
 
         self._draw_board(canvas, board_px_w, board_px_h, board_y0)
@@ -78,10 +81,10 @@ class Renderer:
         self._draw_idle_pieces(canvas, snapshot, animators, motions, board_y0)
         self._draw_moving_pieces(canvas, animators, motions, board_y0)
         self._draw_cooldown_bars(canvas, cooldowns, snapshot, board_y0)
-        self._draw_side_panel(canvas, history, board_px_w, total_h)
+        self._draw_side_panel(canvas, history, board_px_w, total_h, names)
 
         if snapshot.game_over:
-            self._draw_game_over(canvas, board_px_w, board_px_h, board_y0)
+            self._draw_game_over(canvas, board_px_w, board_px_h, board_y0, winner_name)
 
     # ----------------------------------------------------------------- private
 
@@ -89,7 +92,7 @@ class Renderer:
         self,
         canvas: Img,
         x0: int, y0: int, width: int, height: int,
-        color: Color, score: int, captured: list,
+        color: Color, name: str, score: int, captured: list,
     ) -> None:
         cv2.rectangle(canvas.img, (x0, y0), (x0 + width, y0 + height), _BAR_BG, -1)
         accent = _PLAYER_ACCENT[color]
@@ -97,7 +100,7 @@ class Renderer:
 
         name_x = x0 + 20
         name_y = y0 + int(height * 0.42)
-        canvas.put_text(_PLAYER_NAME[color], name_x, name_y, 0.6, accent, 2)
+        canvas.put_text(name.upper(), name_x, name_y, 0.6, accent, 2)
 
         score_y = y0 + int(height * 0.78)
         canvas.put_text(f"Score: {score}", name_x, score_y, 0.42, (200, 200, 200, 255), 1)
@@ -212,12 +215,13 @@ class Renderer:
         history: list,
         board_px_w: int,
         total_h: int,
+        names: dict,
     ) -> None:
         px = board_px_w
         cv2.rectangle(canvas.img, (px, 0), (px + _PANEL_WIDTH, total_h),
                       (25, 25, 25, 255), -1)
         cv2.line(canvas.img, (px, 0), (px, total_h), (70, 70, 70, 255), 1)
-        self._draw_move_history_panel(canvas, history, px, 0, total_h)
+        self._draw_move_history_panel(canvas, history, px, 0, total_h, names)
 
     def _draw_move_history_panel(
         self,
@@ -226,6 +230,7 @@ class Renderer:
         px: int,
         y0: int,
         section_h: int,
+        names: dict,
     ) -> None:
         canvas.put_text("MOVE HISTORY", px + 8, y0 + 26, 0.55, (255, 255, 255, 255), 1)
 
@@ -233,8 +238,8 @@ class Renderer:
         white_x  = px + 8
         black_x  = px + col_w + 8
         header_y = y0 + 50
-        canvas.put_text(_PLAYER_NAME[Color.WHITE], white_x, header_y, 0.42, _HISTORY_WHITE_COLOR, 1)
-        canvas.put_text(_PLAYER_NAME[Color.BLACK], black_x, header_y, 0.42, _HISTORY_BLACK_COLOR, 1)
+        canvas.put_text(names[Color.WHITE].upper(), white_x, header_y, 0.42, _HISTORY_WHITE_COLOR, 1)
+        canvas.put_text(names[Color.BLACK].upper(), black_x, header_y, 0.42, _HISTORY_BLACK_COLOR, 1)
         cv2.line(canvas.img, (px + col_w, y0 + 38), (px + col_w, y0 + section_h),
                   (70, 70, 70, 255), 1)
 
@@ -259,7 +264,7 @@ class Renderer:
             return None
         return Img().read(str(path), size=(size, size))
 
-    def _draw_game_over(self, canvas: Img, w: int, h: int, y0: int) -> None:
+    def _draw_game_over(self, canvas: Img, w: int, h: int, y0: int, winner_name: str | None = None) -> None:
         sub  = canvas.img[y0:y0 + h, :w]
         dark = np.zeros_like(sub)
         dark[:] = (0, 0, 0, 200)
@@ -267,6 +272,9 @@ class Renderer:
         canvas.img[y0:y0 + h, :w] = sub
         canvas.put_text("GAME  OVER", w // 2 - 150, y0 + h // 2,
                         1.8, (255, 255, 255, 255), 3)
+        if winner_name:
+            canvas.put_text(f"{winner_name.upper()} WINS", w // 2 - 110, y0 + h // 2 + 50,
+                             0.9, (0, 215, 255, 255), 2)
 
     @staticmethod
     def _blit(canvas: Img, sprite: Img, x: int, y: int) -> None:

@@ -82,8 +82,18 @@ def test_room_broadcaster_forwards_encoded_messages_to_current_sessions():
 
 
 def test_encode_room_event_for_match_ready():
-    message = json.loads(_encode_room_event("test-room", RoomMatchReady(ts=0.0, room_id="test-room")))
-    assert message == {"type": "broadcast", "event": "match_ready", "room_id": "test-room", "data": {}}
+    event = RoomMatchReady(ts=0.0, room_id="test-room", white_username="alice", black_username="bob")
+    message = json.loads(_encode_room_event("test-room", event))
+    assert message == {
+        "type": "broadcast", "event": "match_ready", "room_id": "test-room",
+        "data": {"white_username": "alice", "black_username": "bob"},
+    }
+
+
+def test_encode_room_event_for_game_over_includes_winner():
+    event = RoomGameOver(ts=0.0, room_id="test-room", reason="king_captured", winner_username="alice")
+    message = json.loads(_encode_room_event("test-room", event))
+    assert message["data"] == {"reason": "king_captured", "winner_username": "alice"}
 
 
 def test_encode_room_event_for_state_tick_includes_motions_and_cooldowns():

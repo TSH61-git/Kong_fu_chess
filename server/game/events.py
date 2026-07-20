@@ -37,11 +37,13 @@ class RoomPieceCaptured(RoomEvent):
 @dataclass(frozen=True)
 class RoomGameOver(RoomEvent):
     reason: str
+    winner_username: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class RoomMatchReady(RoomEvent):
-    pass
+    white_username: str
+    black_username: str
 
 
 @dataclass(frozen=True)

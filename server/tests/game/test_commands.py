@@ -6,6 +6,7 @@ from server.core.protocol import ErrorCode, Envelope
 from server.game import commands
 from server.game.match import MatchSession
 from server.network.session import ClientSession, Role
+from server.tests.support import build_test_repos
 
 
 class _FakeWebSocket:
@@ -13,8 +14,9 @@ class _FakeWebSocket:
         pass
 
 
-def _seated_session(match: MatchSession, role: Role) -> ClientSession:
+def _seated_session(match: MatchSession, role: Role, user_id=1) -> ClientSession:
     session = ClientSession("s1", _FakeWebSocket(), role)
+    session.user_id = user_id
     if role is Role.WHITE:
         match.white = session
     else:
@@ -22,9 +24,17 @@ def _seated_session(match: MatchSession, role: Role) -> ClientSession:
     return session
 
 
+def _unseated_session() -> ClientSession:
+    # role=None is the real "not authenticated / never seated" state — the
+    # gate in game/commands.py checks role, not user_id, since try_seat only
+    # ever assigns both together (server/auth/commands.py).
+    return ClientSession("s1", _FakeWebSocket())
+
+
 def _run_with_match(body) -> None:
     async def wrapper():
-        match = MatchSession(bus=Bus(), clock=FakeClock())
+        auth_service, matches_repo = build_test_repos()
+        match = MatchSession(bus=Bus(), clock=FakeClock(), auth_service=auth_service, matches_repo=matches_repo)
         try:
             await body(match)
         finally:
@@ -38,8 +48,17 @@ class TestHandleMove:
         async def body(match):
             session = _seated_session(match, Role.WHITE)
             envelope = Envelope(type="move", id="1", data={"cmd": "WPe2e3"})
-            reply = commands.handle_move(session, envelope, match)
+            reply = await commands.handle_move(session, envelope, match)
             assert '"ok": true' in reply
+
+        _run_with_match(body)
+
+    def test_rejects_an_unauthenticated_session(self):
+        async def body(match):
+            session = _unseated_session()
+            envelope = Envelope(type="move", id="1", data={"cmd": "WPe2e3"})
+            reply = await commands.handle_move(session, envelope, match)
+            assert ErrorCode.NOT_AUTHENTICATED.value in reply
 
         _run_with_match(body)
 
@@ -47,7 +66,7 @@ class TestHandleMove:
         async def body(match):
             session = _seated_session(match, Role.WHITE)
             envelope = Envelope(type="move", id="1", data={"cmd": "BPe7e6"})
-            reply = commands.handle_move(session, envelope, match)
+            reply = await commands.handle_move(session, envelope, match)
             assert ErrorCode.NOT_YOUR_COLOR.value in reply
 
         _run_with_match(body)
@@ -60,7 +79,7 @@ class TestHandleMove:
         async def body(match):
             session = _seated_session(match, Role.WHITE)
             envelope = Envelope(type="move", id="1", data={"cmd": "WPe7e6"})
-            reply = commands.handle_move(session, envelope, match)
+            reply = await commands.handle_move(session, envelope, match)
             assert ErrorCode.EMPTY_SOURCE.value in reply
 
         _run_with_match(body)
@@ -69,7 +88,7 @@ class TestHandleMove:
         async def body(match):
             session = _seated_session(match, Role.WHITE)
             envelope = Envelope(type="move", id="1", data={"cmd": "WQe2e3"})  # e2 holds a pawn
-            reply = commands.handle_move(session, envelope, match)
+            reply = await commands.handle_move(session, envelope, match)
             assert ErrorCode.PIECE_MISMATCH.value in reply
 
         _run_with_match(body)
@@ -78,7 +97,7 @@ class TestHandleMove:
         async def body(match):
             session = _seated_session(match, Role.WHITE)
             envelope = Envelope(type="move", id="1", data={"cmd": "bad"})
-            reply = commands.handle_move(session, envelope, match)
+            reply = await commands.handle_move(session, envelope, match)
             assert ErrorCode.MALFORMED_COMMAND.value in reply
 
         _run_with_match(body)
@@ -88,7 +107,7 @@ class TestHandleMove:
             session = _seated_session(match, Role.WHITE)
             # Three squares forward is not a legal opening pawn move.
             envelope = Envelope(type="move", id="1", data={"cmd": "WPe2e5"})
-            reply = commands.handle_move(session, envelope, match)
+            reply = await commands.handle_move(session, envelope, match)
             assert ErrorCode.ILLEGAL_PIECE_MOVE.value in reply
 
         _run_with_match(body)
@@ -99,7 +118,7 @@ class TestHandleJump:
         async def body(match):
             session = _seated_session(match, Role.WHITE)
             envelope = Envelope(type="jump", id="1", data={"cmd": "WPe2e2"})
-            reply = commands.handle_jump(session, envelope, match)
+            reply = await commands.handle_jump(session, envelope, match)
             assert '"ok": true' in reply
 
         _run_with_match(body)
@@ -108,8 +127,17 @@ class TestHandleJump:
         async def body(match):
             session = _seated_session(match, Role.BLACK)
             envelope = Envelope(type="jump", id="1", data={"cmd": "WPe2e2"})
-            reply = commands.handle_jump(session, envelope, match)
+            reply = await commands.handle_jump(session, envelope, match)
             assert ErrorCode.NOT_YOUR_COLOR.value in reply
+
+        _run_with_match(body)
+
+    def test_rejects_an_unauthenticated_session(self):
+        async def body(match):
+            session = _unseated_session()
+            envelope = Envelope(type="jump", id="1", data={"cmd": "WPe2e2"})
+            reply = await commands.handle_jump(session, envelope, match)
+            assert ErrorCode.NOT_AUTHENTICATED.value in reply
 
         _run_with_match(body)
 
@@ -119,7 +147,16 @@ class TestHandlePing:
         async def body(match):
             session = _seated_session(match, Role.WHITE)
             envelope = Envelope(type="ping", id="9", data={})
-            reply = commands.handle_ping(session, envelope, match)
+            reply = await commands.handle_ping(session, envelope, match)
+            assert '"ok": true' in reply
+
+        _run_with_match(body)
+
+    def test_acks_even_when_unauthenticated(self):
+        async def body(match):
+            session = _unseated_session()
+            envelope = Envelope(type="ping", id="9", data={})
+            reply = await commands.handle_ping(session, envelope, match)
             assert '"ok": true' in reply
 
         _run_with_match(body)

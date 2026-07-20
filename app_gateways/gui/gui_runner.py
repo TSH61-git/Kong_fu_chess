@@ -114,6 +114,11 @@ class GuiRunner:
                 },
                 self._runtime.engine.get_scores(),
                 self._runtime.engine.history_entries(),
+                # Only the network facade knows real player names (from
+                # registration) or a winner's name — local/offline play has
+                # neither, so these fall back to Renderer's own defaults.
+                player_names=getattr(self._runtime.engine, "get_player_names", lambda: None)(),
+                winner_name=getattr(self._runtime.engine, "get_winner_name", lambda: None)(),
             )
 
             if not self._window_sized:

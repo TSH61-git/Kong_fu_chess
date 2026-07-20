@@ -18,6 +18,9 @@ build/
 *.egg
 MANIFEST
 
+# ── Server data ───────────────────────────────────────────────────────
+server/*.db
+
 # ── Testing & coverage ────────────────────────────────────────────────
 .pytest_cache/
 .coverage
