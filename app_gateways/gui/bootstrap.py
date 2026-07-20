@@ -6,7 +6,7 @@ from chess_engine.engine.game_engine import GameEngine
 from chess_engine.input.board_mapper import BoardMapper
 from chess_engine.input.controller import Controller
 from app_gateways.text_cli.bootstrap import GameRuntime
-from app_gateways.gui.translator import standard_board
+from chess_engine.model.board_factory import standard_board
 
 
 def bootstrap_gui(board: Board | None = None):

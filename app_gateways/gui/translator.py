@@ -38,18 +38,3 @@ def board_to_grid(board: Board) -> list[list[Piece | None]]:
         [board.get(Position(row, col)) for col in range(board.cols)]
         for row in range(board.rows)
     ]
-
-
-def standard_board() -> Board:
-    """Build a standard 8×8 starting position board using typed Piece objects."""
-    back_rank = [
-        PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN,
-        PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK,
-    ]
-    board = Board(rows=8, cols=8)
-    for col, pt in enumerate(back_rank):
-        board.set(Position(0, col), Piece(pt, Color.BLACK))
-        board.set(Position(1, col), Piece(PieceType.PAWN, Color.BLACK))
-        board.set(Position(6, col), Piece(PieceType.PAWN, Color.WHITE))
-        board.set(Position(7, col), Piece(pt, Color.WHITE))
-    return board

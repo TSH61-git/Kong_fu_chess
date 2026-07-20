@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import pathlib
 import time
 
@@ -72,7 +73,7 @@ class GuiRunner:
 
     # ------------------------------------------------------------------ public
 
-    def run(self) -> None:
+    async def run(self) -> None:
         cv2.namedWindow(_WINDOW, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(_WINDOW, self._on_mouse)
         self._window_sized = False
@@ -124,6 +125,11 @@ class GuiRunner:
             wait = max(1, int(frame_ms - (time.perf_counter() - now) * 1000))
             if cv2.waitKey(wait) == 27:
                 break
+            # Yields to the event loop once per frame so a concurrently
+            # running coroutine (e.g. a network client's receive loop) gets
+            # to run between frames — cv2.waitKey itself already paces us,
+            # this just stops that pacing from starving the rest of asyncio.
+            await asyncio.sleep(0)
 
         cv2.destroyAllWindows()
 
