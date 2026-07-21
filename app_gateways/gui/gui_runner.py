@@ -13,7 +13,9 @@ from app_gateways.gui.renderer import Renderer, TOP_BAR_H
 from app_gateways.text_cli.bootstrap import GameRuntime
 from app_gateways.gui.translator import piece_dir
 from chess_engine.model.piece import Color, PieceState
+from chess_engine.model.position import Position
 from chess_engine.realtime.motion import Motion
+from chess_engine.rules.movement import legal_destinations
 from config import CELL_SIZE
 
 _ASSETS_DIR = pathlib.Path(__file__).parent / "assets"
@@ -60,6 +62,9 @@ class GuiRunner:
         # frame in _present() and inverted by _on_mouse() to map clicks back.
         self._display_scale   = 1.0
         self._display_offset  = (0, 0)
+        # Hovered board cell, updated by _on_mouse on EVENT_MOUSEMOVE.
+        self._hover_cell: tuple[int, int] | None = None
+        self._window_title    = _WINDOW
         board_img      = Img()
         board_img.img  = cv2.imdecode(
             np.fromfile(str(_ASSETS_DIR / "board.png"), dtype=np.uint8),
@@ -73,16 +78,21 @@ class GuiRunner:
 
     # ------------------------------------------------------------------ public
 
-    async def run(self) -> None:
+    async def run(self) -> bool:
+        """Runs the game loop until the window is closed. Returns True if
+        the OS window's own close (X) button caused the exit, False if it
+        ended via ESC — callers that chain screens (e.g. dev_client's
+        lobby/match loop) use this to distinguish "quit the whole app" from
+        "go back to the previous screen"."""
         cv2.namedWindow(_WINDOW, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(_WINDOW, self._on_mouse)
         self._window_sized = False
+        closed_by_x = False
 
         # init animators from starting board
         board = self._runtime.board
         for row in range(board.rows):
             for col in range(board.cols):
-                from chess_engine.model.position import Position
                 p = board.get(Position(row, col))
                 if p is not None:
                     self._animators[(row, col)] = self._make_animator(p)
@@ -106,6 +116,9 @@ class GuiRunner:
             self._sync_animators(motions)
             self._update_animators(delta_ms)
 
+            player_names = getattr(self._runtime.engine, "get_player_names", lambda: None)()
+            self._sync_window_title(player_names)
+
             self._renderer.draw(
                 self._canvas, snapshot, self._animators, motions, cooldowns,
                 {
@@ -117,10 +130,12 @@ class GuiRunner:
                 # Only the network facade knows real player names (from
                 # registration) or a winner's name — local/offline play has
                 # neither, so these fall back to Renderer's own defaults.
-                player_names=getattr(self._runtime.engine, "get_player_names", lambda: None)(),
+                player_names=player_names,
                 winner_name=getattr(self._runtime.engine, "get_winner_name", lambda: None)(),
                 disconnect_countdown=getattr(self._runtime.engine, "get_disconnect_countdown", lambda: None)(),
                 game_over_reason=getattr(self._runtime.engine, "get_game_over_reason", lambda: None)(),
+                legal_moves=self._legal_moves_for(board, snapshot.selected_cell),
+                hover_cell=self._hover_cell,
             )
 
             if not self._window_sized:
@@ -132,6 +147,9 @@ class GuiRunner:
             wait = max(1, int(frame_ms - (time.perf_counter() - now) * 1000))
             if cv2.waitKey(wait) == 27:
                 break
+            if self._is_window_closed():
+                closed_by_x = True
+                break
             # Yields to the event loop once per frame so a concurrently
             # running coroutine (e.g. a network client's receive loop) gets
             # to run between frames — cv2.waitKey itself already paces us,
@@ -139,8 +157,18 @@ class GuiRunner:
             await asyncio.sleep(0)
 
         cv2.destroyAllWindows()
+        return closed_by_x
 
     # ----------------------------------------------------------------- private
+
+    def _is_window_closed(self) -> bool:
+        """True once the user has clicked the OS window's own close (X)
+        button — cv2 destroys the underlying HWND but doesn't raise, so this
+        has to be polled explicitly rather than caught as an exception."""
+        try:
+            return cv2.getWindowProperty(_WINDOW, cv2.WND_PROP_VISIBLE) < 1
+        except cv2.error:
+            return True
 
     def _present(self) -> None:
         """Letterbox the native-resolution canvas to fit the current window
@@ -174,7 +202,7 @@ class GuiRunner:
         cv2.imshow(_WINDOW, frame)
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param) -> None:
-        if event != cv2.EVENT_LBUTTONDOWN:
+        if event not in (cv2.EVENT_LBUTTONDOWN, cv2.EVENT_MOUSEMOVE):
             return
         if self._canvas.img is None:
             return
@@ -184,8 +212,46 @@ class GuiRunner:
             x, y, self._display_scale, offset_x, offset_y, native_w, native_h
         )
         if cx is None:
+            if event == cv2.EVENT_MOUSEMOVE:
+                self._hover_cell = None
             return
+
+        if event == cv2.EVENT_MOUSEMOVE:
+            board_y = cy - TOP_BAR_H
+            if board_y < 0:
+                self._hover_cell = None
+            else:
+                self._hover_cell = (board_y // CELL_SIZE, cx // CELL_SIZE)
+            return
+
         self._runtime.controller.click(cx, cy - TOP_BAR_H)
+
+    def _legal_moves_for(
+        self, board, selected: Position | None,
+    ) -> list[tuple[Position, bool]] | None:
+        if selected is None:
+            return None
+        piece = board.get(selected)
+        if piece is None:
+            return None
+        return [
+            (dest, board.get(dest) is not None)
+            for dest in legal_destinations(board, selected, piece)
+        ]
+
+    def _sync_window_title(self, player_names: dict | None) -> None:
+        title = _WINDOW
+        if player_names:
+            white = player_names.get(Color.WHITE)
+            black = player_names.get(Color.BLACK)
+            if white and black:
+                title = f"{_WINDOW} - {white} vs {black}"
+        if title != self._window_title:
+            self._window_title = title
+            try:
+                cv2.setWindowTitle(_WINDOW, title)
+            except cv2.error:
+                pass
 
     def _make_animator(self, piece) -> PieceAnimator:
         return PieceAnimator(piece_dir(piece, _ASSETS_DIR), CELL_SIZE)

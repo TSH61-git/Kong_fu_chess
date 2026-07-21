@@ -73,7 +73,7 @@ class LobbyRunner:
             self._draw()
             self._present()
 
-            if cv2.waitKey(16) == 27:
+            if cv2.waitKey(16) == 27 or self._is_window_closed():
                 if self._queued:
                     await self._send_envelope({"type": "queue_cancel", "data": {}})
                 return
@@ -83,6 +83,12 @@ class LobbyRunner:
             await asyncio.sleep(0)
 
     # ----------------------------------------------------------------- private
+
+    def _is_window_closed(self) -> bool:
+        try:
+            return cv2.getWindowProperty(_WINDOW, cv2.WND_PROP_VISIBLE) < 1
+        except cv2.error:
+            return True
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param) -> None:
         if event != cv2.EVENT_LBUTTONDOWN:

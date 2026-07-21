@@ -173,13 +173,13 @@ class DevClient:
     async def run_lobby_phase(self) -> None:
         await LobbyRunner(self._send_envelope, self._match_ready, self._queue_timeout_event).run()
 
-    async def run_gui_phase(self) -> None:
+    async def run_gui_phase(self) -> bool:
         runtime = build_network_runtime(self._board, self._send_envelope)
         self._facade = runtime.engine
         if self._player_names is not None:
             self._facade.apply_match_ready(*self._player_names)
         print("Match ready - opening the game window.")
-        await GuiRunner(runtime).run()
+        return await GuiRunner(runtime).run()
 
     def _reset_for_next_match(self) -> None:
         # A fresh Board/facade per match: reusing the old ones would leave
@@ -203,14 +203,16 @@ async def run(uri: str) -> None:
                         break  # user quit from the lobby without finding/rejoining a match
                 client._reconnected = False
 
-                await client.run_gui_phase()
-                # GuiRunner's window only ever closes on Esc. Distinguish
-                # "Esc pressed once the match had already ended" (go back to
-                # the lobby to queue again) from "Esc pressed mid-match"
-                # (nothing sane to do but quit — there's no resign command
-                # in the protocol, so the session would stay stuck seated in
-                # a match the GUI no longer represents).
-                if client._facade is None or not client._facade.is_game_over():
+                closed_by_x = await client.run_gui_phase()
+                # Closing the OS window (the X button) always quits the app,
+                # like a real desktop game — never silently reopen the
+                # lobby. Otherwise distinguish "Esc pressed once the match
+                # had already ended" (go back to the lobby to queue again)
+                # from "Esc pressed mid-match" (nothing sane to do but quit
+                # — there's no resign command in the protocol, so the
+                # session would stay stuck seated in a match the GUI no
+                # longer represents).
+                if closed_by_x or client._facade is None or not client._facade.is_game_over():
                     break
                 client._reset_for_next_match()
         receive_task.cancel()

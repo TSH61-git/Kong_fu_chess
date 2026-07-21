@@ -32,6 +32,11 @@ _HISTORY_ROW_H       = 15
 _HISTORY_WHITE_COLOR = (235, 235, 235, 255)   # BGRA
 _HISTORY_BLACK_COLOR = (0, 165, 255, 255)     # BGRA — amber, readable on the dark panel
 
+_COORD_COLOR       = (110, 110, 110, 255)     # muted gray — readable on both square colors
+_LEGAL_DOT_COLOR   = (90, 90, 90, 255)
+_LEGAL_RING_COLOR  = (0, 0, 200, 255)         # red-ish ring on a capturable square
+_HOVER_COLOR       = (230, 230, 230, 255)
+
 _PLAYER_NAME  = {Color.WHITE: "PLAYER 1", Color.BLACK: "PLAYER 2"}
 _PLAYER_ACCENT = {Color.WHITE: _HISTORY_WHITE_COLOR, Color.BLACK: _HISTORY_BLACK_COLOR}
 
@@ -58,6 +63,8 @@ class Renderer:
         winner_name: str | None = None,
         disconnect_countdown: float | None = None,
         game_over_reason: str | None = None,
+        legal_moves: list[tuple[Position, bool]] | None = None,
+        hover_cell: tuple[int, int] | None = None,
     ) -> None:
         names      = player_names or _PLAYER_NAME
         cs         = self._cell_size
@@ -79,7 +86,10 @@ class Renderer:
         )
 
         self._draw_board(canvas, board_px_w, board_px_h, board_y0)
+        self._draw_coordinates(canvas, snapshot, board_y0)
+        self._draw_hover(canvas, snapshot, hover_cell, board_y0)
         self._draw_selection(canvas, snapshot, board_y0)
+        self._draw_legal_moves(canvas, legal_moves, board_y0)
         self._draw_idle_pieces(canvas, snapshot, animators, motions, board_y0)
         self._draw_moving_pieces(canvas, animators, motions, board_y0)
         self._draw_cooldown_bars(canvas, cooldowns, snapshot, board_y0)
@@ -145,6 +155,55 @@ class Renderer:
         highlight[:] = (0, 210, 210, 255)
         cv2.addWeighted(highlight, 0.4, sub, 0.6, 0, sub)
         canvas.img[y:y + cs, x:x + cs] = sub
+
+    def _draw_coordinates(self, canvas: Img, snapshot: GameSnapshot, y0: int) -> None:
+        """In-square file letters (a-h) along the bottom row and rank numbers
+        (8-1, matching MoveHistory's `_square` convention where row 0 is
+        rank 8) along the left column — avoids adding a board margin, which
+        would otherwise require touching the click-mapping math."""
+        cs = self._cell_size
+        bottom_row = snapshot.board_height - 1
+        for col in range(snapshot.board_width):
+            file_letter = chr(ord("a") + col)
+            x = col * cs + 4
+            y = y0 + bottom_row * cs + cs - 6
+            canvas.put_text(file_letter, x, y, 0.32, _COORD_COLOR, 1)
+        for row in range(snapshot.board_height):
+            rank = snapshot.board_height - row
+            x = 4
+            y = y0 + row * cs + 14
+            canvas.put_text(str(rank), x, y, 0.32, _COORD_COLOR, 1)
+
+    def _draw_hover(
+        self, canvas: Img, snapshot: GameSnapshot,
+        hover_cell: tuple[int, int] | None, y0: int,
+    ) -> None:
+        if hover_cell is None:
+            return
+        row, col = hover_cell
+        if not (0 <= row < snapshot.board_height and 0 <= col < snapshot.board_width):
+            return
+        if snapshot.selected_cell is not None and (row, col) == (
+            snapshot.selected_cell.row, snapshot.selected_cell.col
+        ):
+            return  # selection highlight already covers this square
+        cs = self._cell_size
+        x, y = col * cs, y0 + row * cs
+        cv2.rectangle(canvas.img, (x + 1, y + 1), (x + cs - 1, y + cs - 1), _HOVER_COLOR, 2)
+
+    def _draw_legal_moves(
+        self, canvas: Img, legal_moves: list[tuple[Position, bool]] | None, y0: int,
+    ) -> None:
+        if not legal_moves:
+            return
+        cs = self._cell_size
+        for pos, is_capture in legal_moves:
+            cx = pos.col * cs + cs // 2
+            cy = y0 + pos.row * cs + cs // 2
+            if is_capture:
+                cv2.circle(canvas.img, (cx, cy), cs // 2 - 5, _LEGAL_RING_COLOR, 3)
+            else:
+                cv2.circle(canvas.img, (cx, cy), cs // 7, _LEGAL_DOT_COLOR, -1)
 
     def _draw_idle_pieces(
         self,
