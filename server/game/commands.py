@@ -42,6 +42,9 @@ def _handle_move_or_jump(session: ClientSession, envelope: Envelope, is_jump: bo
 
     match = session.current_match
 
+    if match.is_frozen:
+        return encode_error(envelope.id, ErrorCode.ROOM_NOT_READY, "waiting for opponent to reconnect")
+
     raw_command = envelope.data.get("cmd", "")
     try:
         parsed = parse_move_command(raw_command)

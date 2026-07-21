@@ -35,6 +35,7 @@ class DevClient:
         self._queue_timeout_event = asyncio.Event()
         self._pending_response: asyncio.Future | None = None
         self._player_names: tuple[str, str] | None = None
+        self._reconnected = False
 
     async def _send_envelope(self, envelope: dict) -> None:
         await self._websocket.send(json.dumps(envelope))
@@ -88,7 +89,11 @@ class DevClient:
         if self._facade is None:
             return  # pre-game broadcasts (e.g. the tick loop's own state_tick) — nothing to feed yet
 
-        if event == "state_tick":
+        if event == "opponent_disconnected":
+            self._facade.apply_opponent_disconnected(data["countdown_seconds"])
+        elif event == "opponent_reconnected":
+            self._facade.apply_opponent_reconnected()
+        elif event == "state_tick":
             self._facade.apply_state_tick(
                 data["board_grid"], data["active_motions"], data["cooldowns"], data["game_over"],
             )
@@ -107,7 +112,7 @@ class DevClient:
                 Color[data["captured_by"].upper()],
             )
         elif event == "game_over":
-            self._facade.apply_game_over(data.get("winner_username"))
+            self._facade.apply_game_over(data.get("reason"), data.get("winner_username"))
 
     async def _read_line(self) -> str:
         loop = asyncio.get_running_loop()
@@ -150,6 +155,12 @@ class DevClient:
             if reply.get("type") == "ack":
                 verb = "Registered" if command_type == "register" else "Logged in"
                 print(f"{verb} as {username}.")
+                data = reply.get("data", {})
+                if data.get("reconnect"):
+                    self._reconnected = True
+                    self._player_names = (data["white_username"], data["black_username"])
+                    self._match_ready.set()
+                    print("Reconnected to your in-progress match.")
                 return True
             print(f"< error: {reply.get('code')} {reply.get('message', '')}".rstrip())
 
@@ -170,15 +181,38 @@ class DevClient:
         print("Match ready - opening the game window.")
         await GuiRunner(runtime).run()
 
+    def _reset_for_next_match(self) -> None:
+        # A fresh Board/facade per match: reusing the old ones would leave
+        # the final position of the match just played on screen for a beat
+        # before the next match's first state_tick arrives.
+        self._board = Board(rows=8, cols=8)
+        self._facade = None
+        self._player_names = None
+        self._match_ready.clear()
+
 
 async def run(uri: str) -> None:
     async with connect(uri) as websocket:
         client = DevClient(websocket)
         receive_task = asyncio.create_task(client.receive_loop())
         if await client.run_shell_phase():
-            await client.run_lobby_phase()
-            if client._match_ready.is_set():
+            while True:
+                if not client._reconnected:
+                    await client.run_lobby_phase()
+                    if not client._match_ready.is_set():
+                        break  # user quit from the lobby without finding/rejoining a match
+                client._reconnected = False
+
                 await client.run_gui_phase()
+                # GuiRunner's window only ever closes on Esc. Distinguish
+                # "Esc pressed once the match had already ended" (go back to
+                # the lobby to queue again) from "Esc pressed mid-match"
+                # (nothing sane to do but quit — there's no resign command
+                # in the protocol, so the session would stay stuck seated in
+                # a match the GUI no longer represents).
+                if client._facade is None or not client._facade.is_game_over():
+                    break
+                client._reset_for_next_match()
         receive_task.cancel()
 
 

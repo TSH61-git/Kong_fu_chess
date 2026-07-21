@@ -42,7 +42,7 @@ async def handle_connection(websocket: ServerConnection, context: ServerContext)
         pass
     finally:
         if session.current_match is not None:
-            session.current_match.release(session)
+            session.current_match.handle_disconnect(session)
         context.queue.cancel(session)  # no-op if not queued; drops a still-queued dead session
         _logger.info("Session %s disconnected", session_id)
 

@@ -114,6 +114,16 @@ class TestHandleMove:
 
         _run_with_match(body)
 
+    def test_rejects_a_move_while_the_match_is_frozen(self):
+        async def body(match, context):
+            session = _seated_session(match, Role.WHITE)
+            match._frozen = True
+            envelope = Envelope(type="move", id="1", data={"cmd": "WPe2e3"})
+            reply = await commands.handle_move(session, envelope, context)
+            assert ErrorCode.ROOM_NOT_READY.value in reply
+
+        _run_with_match(body)
+
 
 class TestHandleJump:
     def test_accepts_a_jump_for_the_authorized_color(self):

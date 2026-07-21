@@ -52,3 +52,14 @@ class RoomStateTick(RoomEvent):
     active_motions: list[dict]
     cooldowns: list[dict]
     game_over: bool
+
+
+@dataclass(frozen=True)
+class RoomOpponentDisconnected(RoomEvent):
+    role: str
+    countdown_seconds: float
+
+
+@dataclass(frozen=True)
+class RoomOpponentReconnected(RoomEvent):
+    role: str

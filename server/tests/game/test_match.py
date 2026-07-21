@@ -208,16 +208,22 @@ class TestRecordResult:
 
         _run(body)
 
-    def test_result_is_skipped_when_a_player_has_disconnected(self):
+    def test_result_still_recorded_when_a_player_has_disconnected(self):
+        # try_seat persists each seat's user id independently of the live
+        # ClientSession, so a disconnect (a plain release() here) no longer
+        # causes the eventual result/Elo update to be silently skipped.
         async def body():
             match = _new_match()
             try:
                 white, black = await self._seat_authenticated_players(match)
                 match.release(white)
+                match.stack.engine.events.publish(
+                    PieceCaptured(piece=Piece(PieceType.KING, Color.WHITE), captured_by=Color.BLACK),
+                )
                 match.stack.engine.notify_king_captured()
                 await match.record_result_task
                 black_user = await match.auth_service.users_repo.get_by_id(black.user_id)
-                assert black_user.elo == 1200  # untouched: recording was skipped
+                assert black_user.elo > 1200
             finally:
                 match._tick_task.cancel()
 

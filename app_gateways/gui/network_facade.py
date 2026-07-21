@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
@@ -42,8 +43,10 @@ class NetworkGameFacade:
         self._motions: list[Motion] = []
         self._cooldowns: dict[Position, int] = {}
         self._game_over = False
+        self._game_over_reason: Optional[str] = None
         self._player_names: dict[Color, str] = {}
         self._winner_name: Optional[str] = None
+        self._disconnect_deadline: Optional[float] = None
         self._events = EventManager()
         self._history = MoveHistory(self._events)
         self._score = ScoreManager(self._events)
@@ -62,6 +65,8 @@ class NetworkGameFacade:
         self._motions = deserialize_motions(active_motions)
         self._cooldowns = deserialize_cooldowns(cooldowns)
         self._game_over = game_over
+        if game_over:
+            self._disconnect_deadline = None
 
     def apply_move_accepted(
         self,
@@ -82,9 +87,21 @@ class NetworkGameFacade:
     def apply_match_ready(self, white_username: str, black_username: str) -> None:
         self._player_names = {Color.WHITE: white_username, Color.BLACK: black_username}
 
-    def apply_game_over(self, winner_username: Optional[str] = None) -> None:
+    def apply_game_over(self, reason: Optional[str] = None, winner_username: Optional[str] = None) -> None:
         self._game_over = True
+        self._game_over_reason = reason
         self._winner_name = winner_username
+        # A disconnect-driven ending (or a normal one arriving while the
+        # countdown banner from an earlier disconnect happened to still be
+        # up) must not leave a frozen countdown banner drawn on top of the
+        # game-over screen.
+        self._disconnect_deadline = None
+
+    def apply_opponent_disconnected(self, countdown_seconds: float) -> None:
+        self._disconnect_deadline = time.monotonic() + countdown_seconds
+
+    def apply_opponent_reconnected(self) -> None:
+        self._disconnect_deadline = None
 
     # --------------------------------------------------- outbound: GuiRunner -> facade
 
@@ -114,6 +131,17 @@ class NetworkGameFacade:
 
     def get_winner_name(self) -> Optional[str]:
         return self._winner_name
+
+    def is_game_over(self) -> bool:
+        return self._game_over
+
+    def get_game_over_reason(self) -> Optional[str]:
+        return self._game_over_reason
+
+    def get_disconnect_countdown(self) -> Optional[float]:
+        if self._disconnect_deadline is None:
+            return None
+        return max(0.0, self._disconnect_deadline - time.monotonic())
 
     # --------------------------------------------------- IGameEngine Protocol: Controller -> facade
 

@@ -56,6 +56,8 @@ class Renderer:
         history: list,
         player_names: dict | None = None,
         winner_name: str | None = None,
+        disconnect_countdown: float | None = None,
+        game_over_reason: str | None = None,
     ) -> None:
         names      = player_names or _PLAYER_NAME
         cs         = self._cell_size
@@ -84,7 +86,9 @@ class Renderer:
         self._draw_side_panel(canvas, history, board_px_w, total_h, names)
 
         if snapshot.game_over:
-            self._draw_game_over(canvas, board_px_w, board_px_h, board_y0, winner_name)
+            self._draw_game_over(canvas, board_px_w, board_px_h, board_y0, winner_name, game_over_reason)
+        elif disconnect_countdown is not None:
+            self._draw_disconnect_banner(canvas, board_px_w, board_y0, disconnect_countdown)
 
     # ----------------------------------------------------------------- private
 
@@ -264,17 +268,45 @@ class Renderer:
             return None
         return Img().read(str(path), size=(size, size))
 
-    def _draw_game_over(self, canvas: Img, w: int, h: int, y0: int, winner_name: str | None = None) -> None:
+    def _draw_game_over(
+        self, canvas: Img, w: int, h: int, y0: int,
+        winner_name: str | None = None, reason: str | None = None,
+    ) -> None:
         sub  = canvas.img[y0:y0 + h, :w]
         dark = np.zeros_like(sub)
         dark[:] = (0, 0, 0, 200)
         cv2.addWeighted(dark, 0.6, sub, 0.4, 0, sub)
         canvas.img[y0:y0 + h, :w] = sub
-        canvas.put_text("GAME  OVER", w // 2 - 150, y0 + h // 2,
-                        1.8, (255, 255, 255, 255), 3)
-        if winner_name:
-            canvas.put_text(f"{winner_name.upper()} WINS", w // 2 - 110, y0 + h // 2 + 50,
+
+        title = "GAME  OVER"
+        if reason == "disconnect_timeout":
+            title = "OPPONENT DISCONNECTED"
+        elif reason == "both_disconnected":
+            title = "NO CONTEST"
+        canvas.put_text(title, w // 2 - 150, y0 + h // 2, 1.8, (255, 255, 255, 255), 3)
+
+        if reason == "both_disconnected":
+            canvas.put_text("BOTH PLAYERS DISCONNECTED", w // 2 - 155, y0 + h // 2 + 50,
+                             0.75, (0, 215, 255, 255), 2)
+        elif winner_name:
+            subtitle = f"{winner_name.upper()} WINS"
+            if reason == "disconnect_timeout":
+                subtitle += " BY FORFEIT"
+            canvas.put_text(subtitle, w // 2 - 110, y0 + h // 2 + 50,
                              0.9, (0, 215, 255, 255), 2)
+
+        canvas.put_text("Press ESC to return to Lobby", w // 2 - 130, y0 + h // 2 + 95,
+                         0.55, (200, 200, 200, 255), 1)
+
+    def _draw_disconnect_banner(self, canvas: Img, w: int, y0: int, countdown_seconds: float) -> None:
+        banner_h = 40
+        sub  = canvas.img[y0:y0 + banner_h, :w]
+        dark = np.zeros_like(sub)
+        dark[:] = (0, 0, 60, 220)
+        cv2.addWeighted(dark, 0.75, sub, 0.25, 0, sub)
+        canvas.img[y0:y0 + banner_h, :w] = sub
+        text = f"Opponent disconnected - auto-resign in {int(countdown_seconds) + 1}s"
+        canvas.put_text(text, 16, y0 + int(banner_h * 0.65), 0.6, (255, 255, 255, 255), 2)
 
     @staticmethod
     def _blit(canvas: Img, sprite: Img, x: int, y: int) -> None:

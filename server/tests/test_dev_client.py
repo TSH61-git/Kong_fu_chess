@@ -35,6 +35,7 @@ class _FakeFacade:
         self.pieces_captured: list[tuple] = []
         self.game_over_calls = 0
         self.winner_names: list = []
+        self.game_over_reasons: list = []
 
     def apply_state_tick(self, board_grid, active_motions, cooldowns, game_over) -> None:
         self.state_ticks.append((board_grid, active_motions, cooldowns, game_over))
@@ -45,9 +46,10 @@ class _FakeFacade:
     def apply_piece_captured(self, piece_type, piece_color, captured_by) -> None:
         self.pieces_captured.append((piece_type, piece_color, captured_by))
 
-    def apply_game_over(self, winner_username=None) -> None:
+    def apply_game_over(self, reason=None, winner_username=None) -> None:
         self.game_over_calls += 1
         self.winner_names.append(winner_username)
+        self.game_over_reasons.append(reason)
 
 
 class TestAuthenticate:
@@ -223,3 +225,4 @@ class TestHandleMessage:
         })
         assert client._facade.game_over_calls == 1
         assert client._facade.winner_names == ["alice"]
+        assert client._facade.game_over_reasons == ["king_captured"]

@@ -17,6 +17,8 @@ from server.game.events import (
     RoomGameOver,
     RoomMatchReady,
     RoomMoveAccepted,
+    RoomOpponentDisconnected,
+    RoomOpponentReconnected,
     RoomPieceCaptured,
     RoomStateTick,
 )
@@ -116,12 +118,22 @@ def _encode_match_ready(event: RoomMatchReady) -> tuple[str, dict]:
     return "match_ready", {"white_username": event.white_username, "black_username": event.black_username}
 
 
+def _encode_opponent_disconnected(event: RoomOpponentDisconnected) -> tuple[str, dict]:
+    return "opponent_disconnected", {"role": event.role, "countdown_seconds": event.countdown_seconds}
+
+
+def _encode_opponent_reconnected(event: RoomOpponentReconnected) -> tuple[str, dict]:
+    return "opponent_reconnected", {"role": event.role}
+
+
 _ENCODERS: dict[type, Callable[[object], tuple[str, dict]]] = {
     RoomMoveAccepted: _encode_move_accepted,
     RoomPieceCaptured: _encode_piece_captured,
     RoomGameOver: _encode_game_over,
     RoomStateTick: _encode_state_tick,
     RoomMatchReady: _encode_match_ready,
+    RoomOpponentDisconnected: _encode_opponent_disconnected,
+    RoomOpponentReconnected: _encode_opponent_reconnected,
 }
 
 

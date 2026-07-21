@@ -28,7 +28,7 @@ def _new_context_and_matchmaker() -> tuple[ServerContext, Matchmaker, MatchRegis
     queue = MatchmakingQueue()
     registry = MatchRegistry()
     bus = Bus()
-    context = ServerContext(auth_service=auth_service, clock=clock, queue=queue)
+    context = ServerContext(auth_service=auth_service, clock=clock, queue=queue, registry=registry)
     matchmaker = Matchmaker(
         queue=queue, registry=registry, bus=bus, clock=clock,
         auth_service=auth_service, matches_repo=matches_repo, tick_ms=_NO_TICKS_DURING_TEST_MS,

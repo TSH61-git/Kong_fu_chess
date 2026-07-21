@@ -23,5 +23,11 @@ class MatchRegistry:
     def get(self, room_id: str) -> Optional[MatchSession]:
         return self._matches.get(room_id)
 
+    def find_awaiting_reconnect(self, user_id: int) -> Optional[MatchSession]:
+        for match in self._matches.values():
+            if match.is_awaiting_reconnect(user_id):
+                return match
+        return None
+
     def __len__(self) -> int:
         return len(self._matches)

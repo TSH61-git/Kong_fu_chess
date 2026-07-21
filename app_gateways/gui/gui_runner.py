@@ -119,6 +119,8 @@ class GuiRunner:
                 # neither, so these fall back to Renderer's own defaults.
                 player_names=getattr(self._runtime.engine, "get_player_names", lambda: None)(),
                 winner_name=getattr(self._runtime.engine, "get_winner_name", lambda: None)(),
+                disconnect_countdown=getattr(self._runtime.engine, "get_disconnect_countdown", lambda: None)(),
+                game_over_reason=getattr(self._runtime.engine, "get_game_over_reason", lambda: None)(),
             )
 
             if not self._window_sized:

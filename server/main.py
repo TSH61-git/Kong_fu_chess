@@ -33,7 +33,7 @@ async def main() -> None:
 
     registry = MatchRegistry()
     queue = MatchmakingQueue(elo_range=config.QUEUE_ELO_RANGE)
-    context = ServerContext(auth_service=auth_service, clock=clock, queue=queue)
+    context = ServerContext(auth_service=auth_service, clock=clock, queue=queue, registry=registry)
     matchmaker = Matchmaker(
         queue=queue, registry=registry, bus=bus, clock=clock,
         auth_service=auth_service, matches_repo=matches_repo,

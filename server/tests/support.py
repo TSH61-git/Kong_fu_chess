@@ -13,6 +13,7 @@ from server.db.connection import create_connection
 from server.db.matches_repository import MatchesRepository
 from server.db.schema import init_schema
 from server.db.users_repository import UsersRepository
+from server.game.registry import MatchRegistry
 from server.matchmaking.queue import MatchmakingQueue
 from server.network.context import ServerContext
 
@@ -25,7 +26,10 @@ def build_test_repos() -> tuple[AuthService, MatchesRepository]:
 
 def build_test_context(clock: Optional[Clock] = None) -> ServerContext:
     auth_service, _ = build_test_repos()
-    return ServerContext(auth_service=auth_service, clock=clock or FakeClock(), queue=MatchmakingQueue())
+    return ServerContext(
+        auth_service=auth_service, clock=clock or FakeClock(),
+        queue=MatchmakingQueue(), registry=MatchRegistry(),
+    )
 
 
 async def wait_until(

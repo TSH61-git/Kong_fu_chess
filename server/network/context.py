@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from server.auth.service import AuthService
 from server.core.clock import Clock
+from server.game.registry import MatchRegistry
 from server.matchmaking.queue import MatchmakingQueue
 
 
@@ -17,3 +18,4 @@ class ServerContext:
     auth_service: AuthService
     clock: Clock
     queue: MatchmakingQueue
+    registry: MatchRegistry
