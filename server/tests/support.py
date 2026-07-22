@@ -8,6 +8,7 @@ import time
 from typing import Awaitable, Callable, Optional, Union
 
 from server.auth.service import AuthService
+from server.core.bus import Bus
 from server.core.clock import Clock, FakeClock
 from server.db.connection import create_connection
 from server.db.matches_repository import MatchesRepository
@@ -25,10 +26,11 @@ def build_test_repos() -> tuple[AuthService, MatchesRepository]:
 
 
 def build_test_context(clock: Optional[Clock] = None) -> ServerContext:
-    auth_service, _ = build_test_repos()
+    auth_service, matches_repo = build_test_repos()
     return ServerContext(
         auth_service=auth_service, clock=clock or FakeClock(),
         queue=MatchmakingQueue(), registry=MatchRegistry(),
+        bus=Bus(), matches_repo=matches_repo,
     )
 
 

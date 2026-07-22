@@ -31,6 +31,8 @@ class ErrorCode(Enum):
     ALREADY_IN_MATCH = "ALREADY_IN_MATCH"
     ALREADY_QUEUED = "ALREADY_QUEUED"
     NOT_QUEUED = "NOT_QUEUED"
+    ROOM_NOT_FOUND = "ROOM_NOT_FOUND"
+    ROOM_ALREADY_EXISTS = "ROOM_ALREADY_EXISTS"
 
 
 # chess_engine's MoveResult.reason / MoveValidation.reason strings, confirmed

@@ -101,11 +101,12 @@ def test_encode_room_event_for_state_tick_includes_motions_and_cooldowns():
     event = RoomStateTick(
         ts=0.0, room_id="test-room",
         board_grid=[[None]], active_motions=[{"piece": "wQ"}], cooldowns=[{"square": "e5"}],
-        game_over=False,
+        game_over=False, frozen=True,
     )
     message = json.loads(_encode_room_event("test-room", event))
     assert message["data"]["active_motions"] == [{"piece": "wQ"}]
     assert message["data"]["cooldowns"] == [{"square": "e5"}]
+    assert message["data"]["frozen"] is True
 
 
 def test_room_broadcaster_close_stops_forwarding():

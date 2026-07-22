@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 
 from websockets.asyncio.client import connect
@@ -24,6 +25,8 @@ from app_gateways.gui.network_facade import build_network_runtime
 from chess_engine.model.board import Board
 from chess_engine.model.piece import Color, PieceType
 from chess_engine.wire.notation import square_to_position
+
+_logger = logging.getLogger("kfchess.client")
 
 
 class DevClient:
@@ -36,8 +39,12 @@ class DevClient:
         self._pending_response: asyncio.Future | None = None
         self._player_names: tuple[str, str] | None = None
         self._reconnected = False
+        self._room_id: str | None = None
+        self._role: str | None = None
+        self._initial_scores: tuple[int, int] = (0, 0)
 
     async def _send_envelope(self, envelope: dict) -> None:
+        _logger.debug("-> %s", envelope)
         await self._websocket.send(json.dumps(envelope))
 
     async def _send_and_wait(self, envelope: dict) -> dict:
@@ -57,6 +64,7 @@ class DevClient:
             self._handle_message(json.loads(raw_message))
 
     def _handle_message(self, message: dict) -> None:
+        _logger.debug("<- %s", message)
         message_type = message.get("type")
         event = message.get("event")
         data = message.get("data", {})
@@ -67,7 +75,8 @@ class DevClient:
             return
 
         if message_type == "notice" and event == "seated":
-            print(f"Seated as {data['role'].upper()}.")
+            self._role = data["role"]
+            _logger.info("Seated as %s", self._role.upper())
             return
         if message_type == "notice" and event == "queue_timeout":
             self._queue_timeout_event.set()
@@ -75,6 +84,11 @@ class DevClient:
         if message_type == "broadcast" and event == "match_ready":
             self._player_names = (data["white_username"], data["black_username"])
             self._match_ready.set()
+            # A custom room's creator is already in the GUI (facade built)
+            # by the time a 2nd player joins and this fires — matchmaking's
+            # pre-game case instead has run_gui_phase apply it once built.
+            if self._facade is not None:
+                self._facade.apply_match_ready(*self._player_names)
             return
         if message_type == "error":
             print(f"< error: {message.get('code')} {message.get('message', '')}".rstrip())
@@ -96,6 +110,7 @@ class DevClient:
         elif event == "state_tick":
             self._facade.apply_state_tick(
                 data["board_grid"], data["active_motions"], data["cooldowns"], data["game_over"],
+                data.get("frozen", False),
             )
         elif event == "move_accepted":
             self._facade.apply_move_accepted(
@@ -158,27 +173,45 @@ class DevClient:
                 data = reply.get("data", {})
                 if data.get("reconnect"):
                     self._reconnected = True
+                    self._room_id = data.get("room_id")
+                    self._role = "white" if username == data["white_username"] else "black"
                     self._player_names = (data["white_username"], data["black_username"])
                     self._match_ready.set()
-                    print("Reconnected to your in-progress match.")
+                    _logger.info("Reconnected to in-progress match room=%s", self._room_id)
                 return True
             print(f"< error: {reply.get('code')} {reply.get('message', '')}".rstrip())
 
     async def run_shell_phase(self) -> bool:
         """Authenticates over the shell. Everything past this point (finding
         an opponent, playing) happens in the GUI, not typed commands."""
-        print("Connected.")
+        _logger.info("Connected.")
         return await self._authenticate()
 
     async def run_lobby_phase(self) -> None:
-        await LobbyRunner(self._send_envelope, self._match_ready, self._queue_timeout_event).run()
+        result = await LobbyRunner(
+            self._send_envelope, self._send_and_wait, self._match_ready, self._queue_timeout_event,
+        ).run()
+        if result is not None:
+            self._room_id = result["room_id"]
+            self._role = result["role"]
+            white_name = result.get("white_username")
+            black_name = result.get("black_username")
+            if white_name and black_name:
+                self._player_names = (white_name, black_name)
+            self._initial_scores = (result.get("white_score", 0), result.get("black_score", 0))
+            _logger.info("Room %s: joined as %s", self._room_id, self._role)
+            self._match_ready.set()
 
     async def run_gui_phase(self) -> bool:
-        runtime = build_network_runtime(self._board, self._send_envelope)
+        runtime = build_network_runtime(
+            self._board, self._send_envelope,
+            room_id=self._room_id, read_only=(self._role == "viewer"),
+            initial_scores=self._initial_scores,
+        )
         self._facade = runtime.engine
         if self._player_names is not None:
             self._facade.apply_match_ready(*self._player_names)
-        print("Match ready - opening the game window.")
+        _logger.info("Entering game: room=%s role=%s", self._room_id, self._role)
         return await GuiRunner(runtime).run()
 
     def _reset_for_next_match(self) -> None:
@@ -189,6 +222,9 @@ class DevClient:
         self._facade = None
         self._player_names = None
         self._match_ready.clear()
+        self._room_id = None
+        self._role = None
+        self._initial_scores = (0, 0)
 
 
 async def run(uri: str) -> None:
@@ -219,6 +255,7 @@ async def run(uri: str) -> None:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     uri = sys.argv[1] if len(sys.argv) > 1 else "ws://localhost:8765"
     try:
         asyncio.run(run(uri))

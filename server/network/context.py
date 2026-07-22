@@ -8,7 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from server.auth.service import AuthService
+from server.core.bus import Bus
 from server.core.clock import Clock
+from server.db.matches_repository import MatchesRepository
 from server.game.registry import MatchRegistry
 from server.matchmaking.queue import MatchmakingQueue
 
@@ -19,3 +21,5 @@ class ServerContext:
     clock: Clock
     queue: MatchmakingQueue
     registry: MatchRegistry
+    bus: Bus
+    matches_repo: MatchesRepository

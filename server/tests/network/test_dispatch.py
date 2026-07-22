@@ -98,6 +98,42 @@ def test_dispatch_routes_queue_cancel_to_handle_queue_cancel():
     _run(body)
 
 
+def test_dispatch_routes_room_create_to_handle_room_create():
+    async def body():
+        context = build_test_context()
+        user = await context.auth_service.register("alice", "hunter2")
+        session = ClientSession("s1", _FakeWebSocket())
+        session.user_id = user.id
+        envelope = Envelope(type="room_create", id="1", data={})
+        reply = await dispatch(session, envelope, context)
+        assert '"ok": true' in reply
+        assert '"role": "white"' in reply
+        session.current_match._tick_task.cancel()
+
+    _run(body)
+
+
+def test_dispatch_routes_room_join_to_handle_room_join():
+    async def body():
+        context = build_test_context()
+        creator_user = await context.auth_service.register("alice", "hunter2")
+        creator = ClientSession("s1", _FakeWebSocket())
+        creator.user_id = creator_user.id
+        await dispatch(creator, Envelope(type="room_create", id="1", data={}), context)
+        room_id = creator.current_match.room_id
+
+        joiner_user = await context.auth_service.register("bob", "hunter2")
+        joiner = ClientSession("s2", _FakeWebSocket())
+        joiner.user_id = joiner_user.id
+        reply = await dispatch(joiner, Envelope(type="room_join", id="2", data={"room_id": room_id}), context)
+
+        assert '"ok": true' in reply
+        assert '"role": "black"' in reply
+        creator.current_match._tick_task.cancel()
+
+    _run(body)
+
+
 def test_dispatch_rejects_unknown_command_type():
     async def body():
         context = build_test_context()

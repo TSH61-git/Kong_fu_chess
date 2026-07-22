@@ -124,6 +124,17 @@ class TestHandleMove:
 
         _run_with_match(body)
 
+    def test_rejects_a_viewer_without_a_keyerror(self):
+        async def body(match, context):
+            viewer = ClientSession("v1", _FakeWebSocket(), Role.VIEWER)
+            viewer.current_match = match
+            match.viewers.append(viewer)
+            envelope = Envelope(type="move", id="1", data={"cmd": "WPe2e3"})
+            reply = await commands.handle_move(viewer, envelope, context)
+            assert ErrorCode.VIEWER_READ_ONLY.value in reply
+
+        _run_with_match(body)
+
 
 class TestHandleJump:
     def test_accepts_a_jump_for_the_authorized_color(self):

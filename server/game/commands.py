@@ -39,6 +39,8 @@ def _handle_move_or_jump(session: ClientSession, envelope: Envelope, is_jump: bo
     # successfully seated) has nothing else worth validating yet.
     if session.role is None:
         return encode_error(envelope.id, ErrorCode.NOT_AUTHENTICATED, "login or register before making a move")
+    if session.role is Role.VIEWER:
+        return encode_error(envelope.id, ErrorCode.VIEWER_READ_ONLY, "viewers cannot move pieces")
 
     match = session.current_match
 

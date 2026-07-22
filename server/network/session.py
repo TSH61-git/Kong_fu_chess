@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 class Role(Enum):
     WHITE = auto()
     BLACK = auto()
+    VIEWER = auto()
 
 
 class ClientSession:

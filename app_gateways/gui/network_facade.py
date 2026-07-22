@@ -37,9 +37,20 @@ class NetworkGameFacade:
     # GameEngine itself uses internally, fed by translated network events
     # instead of a live EventManager.
 
-    def __init__(self, board: Board, send_envelope: SendEnvelope) -> None:
+    def __init__(
+        self, board: Board, send_envelope: SendEnvelope,
+        room_id: Optional[str] = None, read_only: bool = False,
+        initial_scores: tuple[int, int] = (0, 0),
+    ) -> None:
         self._board = board
         self._send_envelope = send_envelope
+        self._room_id = room_id
+        self._read_only = read_only
+        # Added on top of whatever ScoreManager accumulates locally from here
+        # on — lets a late joiner (a viewer joining mid-game) start from the
+        # match's real current score instead of 0, without needing to replay
+        # every capture event that happened before it connected.
+        self._initial_scores = {Color.WHITE: initial_scores[0], Color.BLACK: initial_scores[1]}
         self._motions: list[Motion] = []
         self._cooldowns: dict[Position, int] = {}
         self._game_over = False
@@ -47,6 +58,7 @@ class NetworkGameFacade:
         self._player_names: dict[Color, str] = {}
         self._winner_name: Optional[str] = None
         self._disconnect_deadline: Optional[float] = None
+        self._frozen = False
         self._events = EventManager()
         self._history = MoveHistory(self._events)
         self._score = ScoreManager(self._events)
@@ -60,11 +72,13 @@ class NetworkGameFacade:
         active_motions: list[dict],
         cooldowns: list[dict],
         game_over: bool,
+        frozen: bool = False,
     ) -> None:
         refresh_board(self._board, board_grid)
         self._motions = deserialize_motions(active_motions)
         self._cooldowns = deserialize_cooldowns(cooldowns)
         self._game_over = game_over
+        self._frozen = frozen
         if game_over:
             self._disconnect_deadline = None
 
@@ -121,13 +135,28 @@ class NetworkGameFacade:
         return self._score.get_captured(color)
 
     def get_scores(self) -> dict[Color, int]:
-        return self._score.get_scores()
+        local = self._score.get_scores()
+        return {color: local[color] + self._initial_scores[color] for color in (Color.WHITE, Color.BLACK)}
 
     def history_entries(self) -> list[MoveRecord]:
         return self._history.entries()
 
     def get_player_names(self) -> dict[Color, str]:
         return self._player_names
+
+    def get_room_id(self) -> Optional[str]:
+        return self._room_id
+
+    def is_read_only(self) -> bool:
+        return self._read_only
+
+    def is_waiting_for_opponent(self) -> bool:
+        # Driven by the server's own freeze state (relayed on every
+        # state_tick), not by whether player_names happen to be populated —
+        # a viewer joining an already-active room misses the original
+        # match_ready broadcast and would otherwise look "still waiting"
+        # forever even though the match is live and unfrozen.
+        return self._frozen
 
     def get_winner_name(self) -> Optional[str]:
         return self._winner_name
@@ -146,9 +175,13 @@ class NetworkGameFacade:
     # --------------------------------------------------- IGameEngine Protocol: Controller -> facade
 
     def request_move(self, source: Position, destination: Position) -> None:
+        if self._read_only:
+            return
         self._send_command("move", source, destination)
 
     def request_jump(self, position: Position) -> None:
+        if self._read_only:
+            return
         self._send_command("jump", position, position)
 
     def validate_move(self, board: Board, source: Position, destination: Position) -> MoveValidation:
@@ -173,7 +206,13 @@ class NetworkGameRuntime:
     controller: Controller
 
 
-def build_network_runtime(board: Board, send_envelope: SendEnvelope) -> NetworkGameRuntime:
-    facade = NetworkGameFacade(board, send_envelope)
+def build_network_runtime(
+    board: Board, send_envelope: SendEnvelope,
+    room_id: Optional[str] = None, read_only: bool = False,
+    initial_scores: tuple[int, int] = (0, 0),
+) -> NetworkGameRuntime:
+    facade = NetworkGameFacade(
+        board, send_envelope, room_id=room_id, read_only=read_only, initial_scores=initial_scores,
+    )
     controller = Controller(engine=facade, mapper=BoardMapper(board), board=board)
     return NetworkGameRuntime(board=board, engine=facade, arbiter=facade, controller=controller)

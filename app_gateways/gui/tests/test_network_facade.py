@@ -144,6 +144,34 @@ class TestApplyPieceCaptured:
         assert facade.get_scores()[Color.WHITE] == 9
 
 
+class TestInitialScores:
+    def test_get_scores_starts_from_the_injected_snapshot(self):
+        async def noop_send(_envelope):
+            pass
+
+        board = Board(rows=8, cols=8)
+        facade = NetworkGameFacade(board, noop_send, initial_scores=(9, 3))
+        assert facade.get_scores() == {Color.WHITE: 9, Color.BLACK: 3}
+
+    def test_later_captures_add_on_top_of_the_initial_snapshot(self):
+        async def noop_send(_envelope):
+            pass
+
+        board = Board(rows=8, cols=8)
+        facade = NetworkGameFacade(board, noop_send, initial_scores=(9, 3))
+        facade.apply_piece_captured(PieceType.PAWN, Color.BLACK, captured_by=Color.WHITE)
+        assert facade.get_scores()[Color.WHITE] == 10
+        assert facade.get_scores()[Color.BLACK] == 3
+
+    def test_defaults_to_zero_zero(self):
+        async def noop_send(_envelope):
+            pass
+
+        board = Board(rows=8, cols=8)
+        facade = NetworkGameFacade(board, noop_send)
+        assert facade.get_scores() == {Color.WHITE: 0, Color.BLACK: 0}
+
+
 class TestAdvanceTime:
     def test_is_a_noop(self):
         board = Board(rows=8, cols=8)
@@ -173,3 +201,89 @@ class TestBuildNetworkRuntime:
         runtime = build_network_runtime(board, noop_send)
         assert isinstance(runtime.controller, Controller)
         assert runtime.board is board
+
+    def test_room_id_and_read_only_thread_through_to_the_facade(self):
+        async def noop_send(_envelope):
+            pass
+
+        board = Board(rows=8, cols=8)
+        runtime = build_network_runtime(board, noop_send, room_id="ABC123", read_only=True, initial_scores=(9, 3))
+        assert runtime.engine.get_room_id() == "ABC123"
+        assert runtime.engine.is_read_only() is True
+        assert runtime.engine.get_scores() == {Color.WHITE: 9, Color.BLACK: 3}
+
+    def test_defaults_are_none_and_not_read_only(self):
+        async def noop_send(_envelope):
+            pass
+
+        board = Board(rows=8, cols=8)
+        runtime = build_network_runtime(board, noop_send)
+        assert runtime.engine.get_room_id() is None
+        assert runtime.engine.is_read_only() is False
+
+
+class TestReadOnly:
+    def test_request_move_is_a_noop_when_read_only(self):
+        async def body():
+            board = Board(rows=8, cols=8)
+            board.set(Position(6, 4), Piece(PieceType.QUEEN, Color.WHITE))
+            sent = []
+
+            async def send_envelope(envelope):
+                sent.append(envelope)
+
+            facade = NetworkGameFacade(board, send_envelope, read_only=True)
+            facade.request_move(Position(6, 4), Position(3, 4))
+            await asyncio.sleep(0.01)
+
+            assert sent == []
+
+        _run(body)
+
+    def test_request_jump_is_a_noop_when_read_only(self):
+        async def body():
+            board = Board(rows=8, cols=8)
+            board.set(Position(6, 4), Piece(PieceType.PAWN, Color.WHITE))
+            sent = []
+
+            async def send_envelope(envelope):
+                sent.append(envelope)
+
+            facade = NetworkGameFacade(board, send_envelope, read_only=True)
+            facade.request_jump(Position(6, 4))
+            await asyncio.sleep(0.01)
+
+            assert sent == []
+
+        _run(body)
+
+
+class TestIsWaitingForOpponent:
+    def test_false_before_any_state_tick_arrives(self):
+        async def noop_send(_envelope):
+            pass
+
+        board = Board(rows=8, cols=8)
+        facade = NetworkGameFacade(board, noop_send, room_id="ABC123")
+        assert facade.is_waiting_for_opponent() is False
+
+    def test_true_once_a_frozen_state_tick_arrives(self):
+        async def noop_send(_envelope):
+            pass
+
+        board = Board(rows=8, cols=8)
+        facade = NetworkGameFacade(board, noop_send, room_id="ABC123")
+        facade.apply_state_tick(board_grid=[[None]], active_motions=[], cooldowns=[], game_over=False, frozen=True)
+        assert facade.is_waiting_for_opponent() is True
+
+    def test_false_once_an_unfrozen_state_tick_arrives(self):
+        # Regression: a viewer joining an already-active room must not show
+        # "waiting for opponent" just because it never saw match_ready —
+        # the real signal is the server's frozen state, not player_names.
+        async def noop_send(_envelope):
+            pass
+
+        board = Board(rows=8, cols=8)
+        facade = NetworkGameFacade(board, noop_send, room_id="ABC123")
+        facade.apply_state_tick(board_grid=[[None]], active_motions=[], cooldowns=[], game_over=False, frozen=False)
+        assert facade.is_waiting_for_opponent() is False

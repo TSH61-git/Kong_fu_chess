@@ -1,15 +1,18 @@
-# MatchSession — the fixed two-slot match abstraction used through Phases 1-4.
-# No viewer roster: that belongs to game/rooms.py from Phase 5 onward, which
-# generalizes this class rather than replacing it. Since Phase 3, many
-# MatchSessions can be alive at once (one per matchmaker pairing), so
-# room_id is a per-instance UUID, not a shared class attribute.
+# MatchSession — the two-seat match abstraction, generalized as of Phase 5 to
+# also carry a viewer roster (spectators added via add_viewer rather than
+# try_seat). Since Phase 3, many MatchSessions can be alive at once (one per
+# matchmaker pairing or custom room), so room_id is a per-instance id — a
+# UUID by default, or an injected human-typable code for custom rooms.
 from __future__ import annotations
 
 import asyncio
 import logging
 import uuid
 from enum import Enum, auto
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
+
+if TYPE_CHECKING:
+    from server.game.registry import MatchRegistry
 
 from chess_engine.engine.events import GameOver, PieceCaptured
 from chess_engine.model.piece import Color, PieceType
@@ -51,8 +54,9 @@ class MatchSession:
         tick_ms: int = config.TICK_MS,
         on_ended: Optional[Callable[["MatchSession"], None]] = None,
         disconnect_grace_seconds: float = config.DISCONNECT_GRACE_SECONDS,
+        room_id: Optional[str] = None,
     ) -> None:
-        self.room_id = str(uuid.uuid4())
+        self.room_id = room_id or str(uuid.uuid4())
         self.stack: EngineStack = build_game_stack()
         self.bus = bus
         self.clock = clock
@@ -64,6 +68,7 @@ class MatchSession:
         self.status = MatchStatus.ACTIVE
         self.white: Optional[ClientSession] = None
         self.black: Optional[ClientSession] = None
+        self.viewers: list[ClientSession] = []
         self._winner_color: Optional[Color] = None
         # Populated once per seat by try_seat and never cleared, so forfeit/
         # Elo bookkeeping (and reconnect lookup) survives a seat's live
@@ -87,11 +92,23 @@ class MatchSession:
         self._tick_task = asyncio.create_task(self._run_tick_loop())
 
     def _sessions(self) -> list[ClientSession]:
-        return [session for session in (self.white, self.black) if session is not None]
+        return [session for session in (self.white, self.black, *self.viewers) if session is not None]
 
     @property
     def is_frozen(self) -> bool:
         return self._frozen
+
+    def pause_for_opponent(self) -> None:
+        # Used by custom room creation: a solo White shouldn't see the clock/
+        # cooldowns run (or be able to move) before a second player joins.
+        # Cleared automatically once try_seat fills the black seat.
+        self._frozen = True
+        # _run_tick_loop skips publishing entirely while frozen (that's the
+        # whole point — no clock/cooldown progress while waiting), so without
+        # this the creator's client would never learn it's frozen at all and
+        # the waiting banner (driven by the client's own frozen flag from the
+        # last state_tick it received) would never appear.
+        self._publish_state_tick()
 
     def try_seat(self, session: ClientSession) -> bool:
         # Seats the 1st already-authenticated session as White, the 2nd as
@@ -111,21 +128,37 @@ class MatchSession:
             session.current_match = self
             self._seat_user_ids[Role.BLACK] = session.user_id
             self._seat_usernames[Role.BLACK] = session.username
+            _logger.info("Room %s: black seated, match ready", self.room_id)
+            # Unconditional: a no-op for matchmaking pairs (never frozen), but
+            # for a custom room this is what lifts pause_for_opponent's
+            # freeze and backfills state immediately rather than waiting up
+            # to TICK_MS for the next natural tick.
+            self._frozen = False
             self.bus.publish(
                 f"room:{self.room_id}", RoomMatchReady(
                     ts=self.clock.now(), room_id=self.room_id,
                     white_username=self.white.username, black_username=self.black.username,
                 ),
             )
+            self._publish_state_tick()
         else:
             return False
         return True
+
+    def add_viewer(self, session: ClientSession) -> None:
+        self.viewers.append(session)
+        session.role = Role.VIEWER
+        session.current_match = self
+        _logger.info("Room %s: viewer joined, %d viewers total", self.room_id, len(self.viewers))
+        self._publish_state_tick()
 
     def release(self, session: ClientSession) -> None:
         if self.white is session:
             self.white = None
         elif self.black is session:
             self.black = None
+        elif session in self.viewers:
+            self.viewers.remove(session)
         else:
             return
         session.role = None
@@ -134,6 +167,9 @@ class MatchSession:
     def handle_disconnect(self, session: ClientSession) -> None:
         role = session.role
         if role is None:
+            return
+        if role is Role.VIEWER:
+            self.release(session)
             return
         self.release(session)
         if self.status is MatchStatus.ENDED:
@@ -319,5 +355,23 @@ class MatchSession:
                 active_motions=serialize_motions(self.stack.arbiter.get_active_motions()),
                 cooldowns=serialize_cooldowns(self.stack.arbiter.get_cooldowns()),
                 game_over=self.status is MatchStatus.ENDED,
+                frozen=self._frozen,
             ),
         )
+
+
+def create_match_session(
+    bus: Bus,
+    clock: Clock,
+    auth_service: AuthService,
+    matches_repo: MatchesRepository,
+    registry: "MatchRegistry",
+    room_id: Optional[str] = None,
+    tick_ms: int = config.TICK_MS,
+) -> MatchSession:
+    match = MatchSession(
+        bus=bus, clock=clock, auth_service=auth_service, matches_repo=matches_repo,
+        tick_ms=tick_ms, on_ended=registry.remove, room_id=room_id,
+    )
+    registry.add(match)
+    return match

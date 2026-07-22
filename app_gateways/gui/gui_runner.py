@@ -128,14 +128,18 @@ class GuiRunner:
                 self._runtime.engine.get_scores(),
                 self._runtime.engine.history_entries(),
                 # Only the network facade knows real player names (from
-                # registration) or a winner's name — local/offline play has
-                # neither, so these fall back to Renderer's own defaults.
+                # registration), a winner's name, or a room id — local/
+                # offline play has none of these, so these fall back to
+                # Renderer's own defaults.
                 player_names=player_names,
                 winner_name=getattr(self._runtime.engine, "get_winner_name", lambda: None)(),
                 disconnect_countdown=getattr(self._runtime.engine, "get_disconnect_countdown", lambda: None)(),
                 game_over_reason=getattr(self._runtime.engine, "get_game_over_reason", lambda: None)(),
                 legal_moves=self._legal_moves_for(board, snapshot.selected_cell),
                 hover_cell=self._hover_cell,
+                room_id=getattr(self._runtime.engine, "get_room_id", lambda: None)(),
+                read_only=getattr(self._runtime.engine, "is_read_only", lambda: False)(),
+                waiting_for_opponent=getattr(self._runtime.engine, "is_waiting_for_opponent", lambda: False)(),
             )
 
             if not self._window_sized:
@@ -203,6 +207,11 @@ class GuiRunner:
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param) -> None:
         if event not in (cv2.EVENT_LBUTTONDOWN, cv2.EVENT_MOUSEMOVE):
+            return
+        # Viewers/spectators get zero interaction with the board — no click,
+        # no hover highlight either ("transparent glass"). Gated here, before
+        # either event type is handled, rather than only in the click branch.
+        if getattr(self._runtime.engine, "is_read_only", lambda: False)():
             return
         if self._canvas.img is None:
             return

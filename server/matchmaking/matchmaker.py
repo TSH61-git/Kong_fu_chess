@@ -11,7 +11,7 @@ from server.core.bus import Bus
 from server.core.clock import Clock
 from server.core.protocol import encode_notice
 from server.db.matches_repository import MatchesRepository
-from server.game.match import MatchSession
+from server.game.match import create_match_session
 from server.game.registry import MatchRegistry
 from server.matchmaking.queue import MatchmakingQueue, QueueEntry
 
@@ -54,11 +54,10 @@ class Matchmaker:
             await entry.session.send(encode_notice("queue_timeout", {}))
 
     async def _seat_pair(self, entry_a: QueueEntry, entry_b: QueueEntry) -> None:
-        match = MatchSession(
+        match = create_match_session(
             bus=self._bus, clock=self._clock, auth_service=self._auth_service,
-            matches_repo=self._matches_repo, tick_ms=self._tick_ms, on_ended=self._registry.remove,
+            matches_repo=self._matches_repo, registry=self._registry, tick_ms=self._tick_ms,
         )
-        self._registry.add(match)
 
         for entry in (entry_a, entry_b):
             match.try_seat(entry.session)

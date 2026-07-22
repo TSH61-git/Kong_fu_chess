@@ -111,6 +111,7 @@ def _encode_state_tick(event: RoomStateTick) -> tuple[str, dict]:
         "active_motions": event.active_motions,
         "cooldowns": event.cooldowns,
         "game_over": event.game_over,
+        "frozen": event.frozen,
     }
 
 

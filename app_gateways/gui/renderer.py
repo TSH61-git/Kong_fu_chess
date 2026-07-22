@@ -65,6 +65,9 @@ class Renderer:
         game_over_reason: str | None = None,
         legal_moves: list[tuple[Position, bool]] | None = None,
         hover_cell: tuple[int, int] | None = None,
+        room_id: str | None = None,
+        read_only: bool = False,
+        waiting_for_opponent: bool = False,
     ) -> None:
         names      = player_names or _PLAYER_NAME
         cs         = self._cell_size
@@ -84,6 +87,8 @@ class Renderer:
             canvas, 0, TOP_BAR_H + board_px_h, board_px_w, BOTTOM_BAR_H,
             color=Color.WHITE, name=names[Color.WHITE], score=scores[Color.WHITE], captured=captured[Color.WHITE],
         )
+        if room_id is not None:
+            self._draw_room_id(canvas, room_id, board_px_w, read_only)
 
         self._draw_board(canvas, board_px_w, board_px_h, board_y0)
         self._draw_coordinates(canvas, snapshot, board_y0)
@@ -99,6 +104,8 @@ class Renderer:
             self._draw_game_over(canvas, board_px_w, board_px_h, board_y0, winner_name, game_over_reason)
         elif disconnect_countdown is not None:
             self._draw_disconnect_banner(canvas, board_px_w, board_y0, disconnect_countdown)
+        elif waiting_for_opponent and room_id is not None:
+            self._draw_waiting_banner(canvas, room_id, board_px_w, board_y0)
 
     # ----------------------------------------------------------------- private
 
@@ -120,6 +127,11 @@ class Renderer:
         canvas.put_text(f"Score: {score}", name_x, score_y, 0.42, (200, 200, 200, 255), 1)
 
         self._draw_captured_row(canvas, captured, x0 + _CAPTURED_START_X, y0, height)
+
+    def _draw_room_id(self, canvas: Img, room_id: str, board_px_w: int, read_only: bool) -> None:
+        text = f"Room: {room_id}" + ("  (VIEWING)" if read_only else "")
+        (text_w, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        canvas.put_text(text, board_px_w - text_w - 12, 20, 0.45, (0, 215, 255, 255), 1)
 
     def _draw_captured_row(
         self, canvas: Img, entries: list, start_x: int, bar_y0: int, bar_h: int
@@ -365,6 +377,16 @@ class Renderer:
         cv2.addWeighted(dark, 0.75, sub, 0.25, 0, sub)
         canvas.img[y0:y0 + banner_h, :w] = sub
         text = f"Opponent disconnected - auto-resign in {int(countdown_seconds) + 1}s"
+        canvas.put_text(text, 16, y0 + int(banner_h * 0.65), 0.6, (255, 255, 255, 255), 2)
+
+    def _draw_waiting_banner(self, canvas: Img, room_id: str, w: int, y0: int) -> None:
+        banner_h = 40
+        sub  = canvas.img[y0:y0 + banner_h, :w]
+        dark = np.zeros_like(sub)
+        dark[:] = (60, 30, 0, 220)   # BGRA — dark amber/blue, distinct from the disconnect banner
+        cv2.addWeighted(dark, 0.75, sub, 0.25, 0, sub)
+        canvas.img[y0:y0 + banner_h, :w] = sub
+        text = f"Waiting for Opponent... Room Code: {room_id}"
         canvas.put_text(text, 16, y0 + int(banner_h * 0.65), 0.6, (255, 255, 255, 255), 2)
 
     @staticmethod

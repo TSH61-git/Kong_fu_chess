@@ -52,6 +52,7 @@ class RoomStateTick(RoomEvent):
     active_motions: list[dict]
     cooldowns: list[dict]
     game_over: bool
+    frozen: bool = False
 
 
 @dataclass(frozen=True)

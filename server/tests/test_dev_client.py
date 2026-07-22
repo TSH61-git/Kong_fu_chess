@@ -37,8 +37,8 @@ class _FakeFacade:
         self.winner_names: list = []
         self.game_over_reasons: list = []
 
-    def apply_state_tick(self, board_grid, active_motions, cooldowns, game_over) -> None:
-        self.state_ticks.append((board_grid, active_motions, cooldowns, game_over))
+    def apply_state_tick(self, board_grid, active_motions, cooldowns, game_over, frozen=False) -> None:
+        self.state_ticks.append((board_grid, active_motions, cooldowns, game_over, frozen))
 
     def apply_move_accepted(self, color, piece_type, source, destination, is_capture) -> None:
         self.moves_accepted.append((color, piece_type, source, destination, is_capture))
@@ -150,11 +150,65 @@ class TestAuthenticate:
         asyncio.run(body())
 
 
+class TestRunLobbyPhase:
+    def test_room_result_with_both_names_populates_player_names_and_scores(self, monkeypatch):
+        async def body():
+            client = DevClient(_FakeWebSocket())
+
+            class _FakeLobbyRunner:
+                def __init__(self, *_args, **_kwargs) -> None:
+                    pass
+
+                async def run(self):
+                    return {
+                        "room_id": "ABC123", "role": "viewer",
+                        "white_username": "alice", "black_username": "bob",
+                        "white_score": 9, "black_score": 3,
+                    }
+
+            monkeypatch.setattr("server.dev_client.LobbyRunner", _FakeLobbyRunner)
+            await client.run_lobby_phase()
+
+            assert client._room_id == "ABC123"
+            assert client._role == "viewer"
+            assert client._player_names == ("alice", "bob")
+            assert client._initial_scores == (9, 3)
+            assert client._match_ready.is_set()
+
+        asyncio.run(body())
+
+    def test_room_result_without_black_yet_leaves_player_names_unset(self, monkeypatch):
+        # The creator of a solo room gets white_username but black_username
+        # is still None — must not populate player_names with a None half.
+        async def body():
+            client = DevClient(_FakeWebSocket())
+
+            class _FakeLobbyRunner:
+                def __init__(self, *_args, **_kwargs) -> None:
+                    pass
+
+                async def run(self):
+                    return {
+                        "room_id": "ABC123", "role": "white",
+                        "white_username": "alice", "black_username": None,
+                        "white_score": 0, "black_score": 0,
+                    }
+
+            monkeypatch.setattr("server.dev_client.LobbyRunner", _FakeLobbyRunner)
+            await client.run_lobby_phase()
+
+            assert client._player_names is None
+
+        asyncio.run(body())
+
+
 class TestHandleMessage:
-    def test_seated_notice_prints_role(self, capsys):
+    def test_seated_notice_stores_and_logs_role(self, caplog):
         client = DevClient(_FakeWebSocket())
-        client._handle_message({"type": "notice", "event": "seated", "data": {"role": "white"}})
-        assert "WHITE" in capsys.readouterr().out
+        with caplog.at_level("INFO"):
+            client._handle_message({"type": "notice", "event": "seated", "data": {"role": "white"}})
+        assert client._role == "white"
+        assert "WHITE" in caplog.text
 
     def test_match_ready_broadcast_sets_the_event_and_stores_names(self):
         client = DevClient(_FakeWebSocket())
@@ -185,7 +239,19 @@ class TestHandleMessage:
             "type": "broadcast", "event": "state_tick",
             "data": {"board_grid": [["wQ"]], "active_motions": [], "cooldowns": [], "game_over": True},
         })
-        assert client._facade.state_ticks == [([["wQ"]], [], [], True)]
+        assert client._facade.state_ticks == [([["wQ"]], [], [], True, False)]
+
+    def test_state_tick_forwards_the_frozen_flag(self):
+        client = DevClient(_FakeWebSocket())
+        client._facade = _FakeFacade()
+        client._handle_message({
+            "type": "broadcast", "event": "state_tick",
+            "data": {
+                "board_grid": [[None]], "active_motions": [], "cooldowns": [],
+                "game_over": False, "frozen": True,
+            },
+        })
+        assert client._facade.state_ticks == [([[None]], [], [], False, True)]
 
     def test_move_accepted_is_forwarded_with_parsed_types(self):
         client = DevClient(_FakeWebSocket())
