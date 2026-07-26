@@ -15,8 +15,8 @@ from server.core.clock import RealClock
 from server.game.registry import MatchRegistry
 from server.matchmaking.matchmaker import Matchmaker
 from server.matchmaking.queue import MatchmakingQueue
-from server.network.context import ServerContext
-from server.network.server import handle_connection
+from server.network.server_context import ServerContext
+from server.network.transport.server import handle_connection
 from server.tests.support import build_test_repos
 
 _NO_TICKS_DURING_TEST_MS = 60_000

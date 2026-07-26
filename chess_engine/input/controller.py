@@ -7,6 +7,7 @@ from chess_engine.model.board import Board
 from chess_engine.model.position import Position
 from chess_engine.input.board_mapper import BoardMapper
 from chess_engine.rules.engine import MoveValidation
+from chess_engine.rules.reasons import MoveRejectReason
 
 
 class IGameEngine(Protocol):
@@ -48,7 +49,7 @@ class Controller:
             self._engine.request_jump(source)
             return
         validation = self._engine.validate_move(self._board, source, cell)
-        if validation.reason == "friendly_destination":
+        if validation.reason == MoveRejectReason.FRIENDLY_DESTINATION:
             self._selected_cell = cell
             return
         self._selected_cell = None

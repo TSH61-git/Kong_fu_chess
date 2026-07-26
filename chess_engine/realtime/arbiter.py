@@ -7,9 +7,9 @@ from chess_engine.model.position import Position
 from chess_engine.realtime.motion import Motion
 from chess_engine.rules.movement import legal_destinations
 from chess_engine.rules.trajectory import linear_path
-from config import CELL_SIZE, PIECE_SPEED
+from config import CELL_SIZE, COOLDOWN_MS, PIECE_SPEED
 
-_COOLDOWN_MS = 1000
+_COOLDOWN_MS = COOLDOWN_MS
 _PROMOTION_TYPE = PieceType.QUEEN
 
 

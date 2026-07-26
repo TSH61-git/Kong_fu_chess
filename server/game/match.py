@@ -23,6 +23,7 @@ from server import config
 from server.auth.service import AuthService
 from server.core.bus import Bus
 from server.core.clock import Clock
+from server.core.wire_events import GameOverReason
 from server.db.matches_repository import MatchesRepository
 from server.game.engine_bridge import EngineEventRelay, RoomBroadcaster
 from server.game.engine_factory import EngineStack, build_game_stack
@@ -33,7 +34,7 @@ from server.game.events import (
     RoomOpponentReconnected,
     RoomStateTick,
 )
-from server.network.session import ClientSession, Role
+from server.network.transport.session import ClientSession, Role
 from server.rating import elo
 
 _logger = logging.getLogger("kfchess.match")
@@ -186,14 +187,14 @@ class MatchSession:
                 self._disconnect_task.cancel()
                 self._disconnect_task = None
             self._frozen = False
-            self.end(reason="both_disconnected")
+            self.end(reason=GameOverReason.BOTH_DISCONNECTED)
             return
 
         self._frozen = True
         self.bus.publish(
             f"room:{self.room_id}", RoomOpponentDisconnected(
                 ts=self.clock.now(), room_id=self.room_id,
-                role=role.name.lower(), countdown_seconds=self._disconnect_grace_seconds,
+                role=role, countdown_seconds=self._disconnect_grace_seconds,
             ),
         )
         self._disconnect_task = asyncio.create_task(self._disconnect_timeout(role))
@@ -209,7 +210,7 @@ class MatchSession:
         if seat is not None:
             return  # reconnected before the grace period ran out
         self._winner_color = Color.BLACK if role is Role.WHITE else Color.WHITE
-        self.end(reason="disconnect_timeout")
+        self.end(reason=GameOverReason.DISCONNECT_TIMEOUT)
 
     def reconnect(self, user_id: int, session: ClientSession) -> Optional[Role]:
         if self.status is MatchStatus.ENDED:
@@ -232,7 +233,7 @@ class MatchSession:
             self._frozen = False
             self.bus.publish(
                 f"room:{self.room_id}", RoomOpponentReconnected(
-                    ts=self.clock.now(), room_id=self.room_id, role=role.name.lower(),
+                    ts=self.clock.now(), room_id=self.room_id, role=role,
                 ),
             )
             self._publish_state_tick()
@@ -248,12 +249,12 @@ class MatchSession:
                 return True
         return False
 
-    def end(self, reason: str) -> None:
+    def end(self, reason: GameOverReason) -> None:
         if self.status is MatchStatus.ENDED:
             return
         self.status = MatchStatus.ENDED
         _logger.info("Match %s ended: %s", self.room_id, reason)
-        if reason != "king_captured":
+        if reason != GameOverReason.KING_CAPTURED:
             # The king-capture path already gets a RoomGameOver broadcast
             # from EngineEventRelay reacting to chess_engine's own GameOver
             # event; every other ending (disconnect forfeit, no-contest) has
@@ -291,7 +292,7 @@ class MatchSession:
             self._on_ended(self)
 
     async def _record_result(
-        self, reason: str, white: Optional[ClientSession], black: Optional[ClientSession],
+        self, reason: GameOverReason, white: Optional[ClientSession], black: Optional[ClientSession],
     ) -> None:
         # Reads persisted seat identity rather than the (possibly already
         # None, e.g. after a disconnect) white/black session parameters, so
@@ -309,7 +310,7 @@ class MatchSession:
             winner_user_id = white_user_id
         elif self._winner_color is Color.BLACK:
             winner_user_id = black_user_id
-        await self._matches_repo.record_result(white_user_id, black_user_id, winner_user_id, reason)
+        await self._matches_repo.record_result(white_user_id, black_user_id, winner_user_id, reason.value)
 
         users_repo = self.auth_service.users_repo
         white_user = await users_repo.get_by_id(white_user_id)
@@ -332,7 +333,7 @@ class MatchSession:
         return self._seat_usernames.get(role) if role is not None else None
 
     def _on_game_over(self, _event: GameOver) -> None:
-        self.end(reason="king_captured")
+        self.end(reason=GameOverReason.KING_CAPTURED)
 
     async def _run_tick_loop(self) -> None:
         try:

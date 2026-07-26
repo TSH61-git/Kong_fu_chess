@@ -8,9 +8,9 @@
 from __future__ import annotations
 
 from server.auth.service import InvalidCredentialsError, UsernameTakenError
-from server.core.protocol import Envelope, ErrorCode, encode_ack, encode_error
-from server.network.context import ServerContext
-from server.network.session import ClientSession
+from server.network.protocol import Envelope, ErrorCode, encode_ack, encode_error
+from server.network.server_context import ServerContext
+from server.network.transport.session import ClientSession
 
 
 async def handle_register(session: ClientSession, envelope: Envelope, context: ServerContext) -> str:

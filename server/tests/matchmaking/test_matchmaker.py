@@ -5,7 +5,7 @@ from server.core.clock import FakeClock
 from server.game.registry import MatchRegistry
 from server.matchmaking.matchmaker import Matchmaker
 from server.matchmaking.queue import MatchmakingQueue
-from server.network.session import ClientSession, Role
+from server.network.transport.session import ClientSession, Role
 from server.tests.support import build_test_repos, wait_until
 
 

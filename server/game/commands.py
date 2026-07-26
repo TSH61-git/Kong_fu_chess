@@ -8,15 +8,15 @@ from __future__ import annotations
 from chess_engine.model.piece import Color
 from chess_engine.wire.notation import MalformedMoveCommandError, parse_move_command
 
-from server.core.protocol import (
+from server.network.protocol import (
     Envelope,
     ErrorCode,
     encode_ack,
     encode_error,
     error_code_for_engine_reason,
 )
-from server.network.context import ServerContext
-from server.network.session import ClientSession, Role
+from server.network.server_context import ServerContext
+from server.network.transport.session import ClientSession, Role
 
 _ROLE_TO_COLOR: dict[Role, Color] = {Role.WHITE: Color.WHITE, Role.BLACK: Color.BLACK}
 

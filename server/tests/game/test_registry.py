@@ -4,7 +4,7 @@ from server.core.bus import Bus
 from server.core.clock import FakeClock
 from server.game.match import MatchSession
 from server.game.registry import MatchRegistry
-from server.network.session import ClientSession
+from server.network.transport.session import ClientSession
 from server.tests.support import build_test_repos
 
 

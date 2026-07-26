@@ -23,8 +23,20 @@ from app_gateways.gui.gui_runner import GuiRunner
 from app_gateways.gui.lobby_runner import LobbyRunner
 from app_gateways.gui.network_facade import build_network_runtime
 from chess_engine.model.board import Board
+from chess_engine.model.board_factory import BOARD_SIZE
 from chess_engine.model.piece import Color, PieceType
 from chess_engine.wire.notation import square_to_position
+from server import config
+from server.core.messages import (
+    GameOverPayload,
+    MatchReadyPayload,
+    MoveAcceptedPayload,
+    OpponentDisconnectedPayload,
+    PieceCapturedPayload,
+    StateTickPayload,
+)
+from server.core.wire_events import CommandType, MessageType, WireEvent
+from server.network.transport.session import Role
 
 _logger = logging.getLogger("kfchess.client")
 
@@ -32,7 +44,7 @@ _logger = logging.getLogger("kfchess.client")
 class DevClient:
     def __init__(self, websocket) -> None:
         self._websocket = websocket
-        self._board = Board(rows=8, cols=8)
+        self._board = Board(rows=BOARD_SIZE, cols=BOARD_SIZE)
         self._facade = None
         self._match_ready = asyncio.Event()
         self._queue_timeout_event = asyncio.Event()
@@ -69,20 +81,21 @@ class DevClient:
         event = message.get("event")
         data = message.get("data", {})
 
-        if message_type in ("ack", "error") and self._pending_response is not None:
+        if message_type in (MessageType.ACK, MessageType.ERROR) and self._pending_response is not None:
             if not self._pending_response.done():
                 self._pending_response.set_result(message)
             return
 
-        if message_type == "notice" and event == "seated":
+        if message_type == MessageType.NOTICE and event == WireEvent.SEATED:
             self._role = data["role"]
             _logger.info("Seated as %s", self._role.upper())
             return
-        if message_type == "notice" and event == "queue_timeout":
+        if message_type == MessageType.NOTICE and event == WireEvent.QUEUE_TIMEOUT:
             self._queue_timeout_event.set()
             return
-        if message_type == "broadcast" and event == "match_ready":
-            self._player_names = (data["white_username"], data["black_username"])
+        if message_type == MessageType.BROADCAST and event == WireEvent.MATCH_READY:
+            match_ready = MatchReadyPayload.from_dict(data)
+            self._player_names = (match_ready.white_username, match_ready.black_username)
             self._match_ready.set()
             # A custom room's creator is already in the GUI (facade built)
             # by the time a 2nd player joins and this fires — matchmaking's
@@ -90,10 +103,10 @@ class DevClient:
             if self._facade is not None:
                 self._facade.apply_match_ready(*self._player_names)
             return
-        if message_type == "error":
+        if message_type == MessageType.ERROR:
             print(f"< error: {message.get('code')} {message.get('message', '')}".rstrip())
             return
-        if message_type == "ack":
+        if message_type == MessageType.ACK:
             if data:
                 print(f"< ok {data}")
             else:
@@ -103,31 +116,36 @@ class DevClient:
         if self._facade is None:
             return  # pre-game broadcasts (e.g. the tick loop's own state_tick) — nothing to feed yet
 
-        if event == "opponent_disconnected":
-            self._facade.apply_opponent_disconnected(data["countdown_seconds"])
-        elif event == "opponent_reconnected":
+        if event == WireEvent.OPPONENT_DISCONNECTED:
+            payload = OpponentDisconnectedPayload.from_dict(data)
+            self._facade.apply_opponent_disconnected(payload.countdown_seconds)
+        elif event == WireEvent.OPPONENT_RECONNECTED:
             self._facade.apply_opponent_reconnected()
-        elif event == "state_tick":
+        elif event == WireEvent.STATE_TICK:
+            payload = StateTickPayload.from_dict(data)
             self._facade.apply_state_tick(
-                data["board_grid"], data["active_motions"], data["cooldowns"], data["game_over"],
-                data.get("frozen", False),
+                payload.board_grid, payload.active_motions, payload.cooldowns,
+                payload.game_over, payload.frozen,
             )
-        elif event == "move_accepted":
+        elif event == WireEvent.MOVE_ACCEPTED:
+            payload = MoveAcceptedPayload.from_dict(data)
             self._facade.apply_move_accepted(
-                Color[data["color"].upper()],
-                PieceType[data["piece_type"].upper()],
-                square_to_position(data["source"]),
-                square_to_position(data["destination"]),
-                data["is_capture"],
+                Color[payload.color.upper()],
+                PieceType[payload.piece_type.upper()],
+                square_to_position(payload.source),
+                square_to_position(payload.destination),
+                payload.is_capture,
             )
-        elif event == "piece_captured":
+        elif event == WireEvent.PIECE_CAPTURED:
+            payload = PieceCapturedPayload.from_dict(data)
             self._facade.apply_piece_captured(
-                PieceType[data["piece_type"].upper()],
-                Color[data["piece_color"].upper()],
-                Color[data["captured_by"].upper()],
+                PieceType[payload.piece_type.upper()],
+                Color[payload.piece_color.upper()],
+                Color[payload.captured_by.upper()],
             )
-        elif event == "game_over":
-            self._facade.apply_game_over(data.get("reason"), data.get("winner_username"))
+        elif event == WireEvent.GAME_OVER:
+            payload = GameOverPayload.from_dict(data)
+            self._facade.apply_game_over(payload.reason, payload.winner_username)
 
     async def _read_line(self) -> str:
         loop = asyncio.get_running_loop()
@@ -146,7 +164,7 @@ class DevClient:
             if choice not in ("1", "2"):
                 print("Please enter 1 or 2.")
                 continue
-            command_type = "register" if choice == "1" else "login"
+            command_type = CommandType.REGISTER if choice == "1" else CommandType.LOGIN
 
             print("Username:")
             username_line = await self._read_line()
@@ -167,14 +185,16 @@ class DevClient:
             reply = await self._send_and_wait(
                 {"type": command_type, "data": {"username": username, "password": password}},
             )
-            if reply.get("type") == "ack":
-                verb = "Registered" if command_type == "register" else "Logged in"
+            if reply.get("type") == MessageType.ACK:
+                verb = "Registered" if command_type == CommandType.REGISTER else "Logged in"
                 print(f"{verb} as {username}.")
                 data = reply.get("data", {})
                 if data.get("reconnect"):
                     self._reconnected = True
                     self._room_id = data.get("room_id")
-                    self._role = "white" if username == data["white_username"] else "black"
+                    self._role = (
+                        Role.WHITE.name.lower() if username == data["white_username"] else Role.BLACK.name.lower()
+                    )
                     self._player_names = (data["white_username"], data["black_username"])
                     self._match_ready.set()
                     _logger.info("Reconnected to in-progress match room=%s", self._room_id)
@@ -205,7 +225,7 @@ class DevClient:
     async def run_gui_phase(self) -> bool:
         runtime = build_network_runtime(
             self._board, self._send_envelope,
-            room_id=self._room_id, read_only=(self._role == "viewer"),
+            room_id=self._room_id, read_only=(self._role == Role.VIEWER.name.lower()),
             initial_scores=self._initial_scores,
         )
         self._facade = runtime.engine
@@ -218,7 +238,7 @@ class DevClient:
         # A fresh Board/facade per match: reusing the old ones would leave
         # the final position of the match just played on screen for a beat
         # before the next match's first state_tick arrives.
-        self._board = Board(rows=8, cols=8)
+        self._board = Board(rows=BOARD_SIZE, cols=BOARD_SIZE)
         self._facade = None
         self._player_names = None
         self._match_ready.clear()
@@ -256,7 +276,7 @@ async def run(uri: str) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    uri = sys.argv[1] if len(sys.argv) > 1 else "ws://localhost:8765"
+    uri = sys.argv[1] if len(sys.argv) > 1 else f"ws://{config.HOST}:{config.PORT}"
     try:
         asyncio.run(run(uri))
     except KeyboardInterrupt:

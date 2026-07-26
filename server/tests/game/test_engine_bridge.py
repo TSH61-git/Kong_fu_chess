@@ -5,6 +5,7 @@ from chess_engine.model.piece import Color, PieceType
 from chess_engine.model.position import Position
 
 from server.core.bus import Bus
+from server.core.wire_events import GameOverReason
 from server.game.engine_bridge import EngineEventRelay, RoomBroadcaster, _encode_room_event
 from server.game.engine_factory import build_game_stack
 from server.game.events import RoomGameOver, RoomMatchReady, RoomMoveAccepted, RoomStateTick
@@ -92,7 +93,7 @@ def test_encode_room_event_for_match_ready():
 
 
 def test_encode_room_event_for_game_over_includes_winner():
-    event = RoomGameOver(ts=0.0, room_id="test-room", reason="king_captured", winner_username="alice")
+    event = RoomGameOver(ts=0.0, room_id="test-room", reason=GameOverReason.KING_CAPTURED, winner_username="alice")
     message = json.loads(_encode_room_event("test-room", event))
     assert message["data"] == {"reason": "king_captured", "winner_username": "alice"}
 

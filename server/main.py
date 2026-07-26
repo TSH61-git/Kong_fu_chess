@@ -16,8 +16,8 @@ from server.db.users_repository import UsersRepository
 from server.game.registry import MatchRegistry
 from server.matchmaking.matchmaker import Matchmaker
 from server.matchmaking.queue import MatchmakingQueue
-from server.network.context import ServerContext
-from server.network.server import serve_forever
+from server.network.server_context import ServerContext
+from server.network.transport.server import serve_forever
 
 
 async def main() -> None:

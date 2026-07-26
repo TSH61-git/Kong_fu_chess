@@ -7,27 +7,28 @@ from typing import Awaitable, Callable
 import logging
 
 from server.auth import commands as auth_commands
-from server.core.protocol import Envelope, ErrorCode, encode_error
+from server.network.protocol import Envelope, ErrorCode, encode_error
 from server.game import commands
 from server.matchmaking import commands as matchmaking_commands
-from server.network.context import ServerContext
-from server.network.session import ClientSession
+from server.network.server_context import ServerContext
+from server.network.transport.session import ClientSession
 from server.rooms import commands as rooms_commands
+from server.core.wire_events import CommandType
 
 _logger = logging.getLogger("kfchess.dispatch")
 
 CommandHandler = Callable[[ClientSession, Envelope, ServerContext], Awaitable[str]]
 
 _HANDLERS: dict[str, CommandHandler] = {
-    "move": commands.handle_move,
-    "jump": commands.handle_jump,
-    "ping": commands.handle_ping,
-    "register": auth_commands.handle_register,
-    "login": auth_commands.handle_login,
-    "queue_join": matchmaking_commands.handle_queue_join,
-    "queue_cancel": matchmaking_commands.handle_queue_cancel,
-    "room_create": rooms_commands.handle_room_create,
-    "room_join": rooms_commands.handle_room_join,
+    CommandType.MOVE: commands.handle_move,
+    CommandType.JUMP: commands.handle_jump,
+    CommandType.PING: commands.handle_ping,
+    CommandType.REGISTER: auth_commands.handle_register,
+    CommandType.LOGIN: auth_commands.handle_login,
+    CommandType.QUEUE_JOIN: matchmaking_commands.handle_queue_join,
+    CommandType.QUEUE_CANCEL: matchmaking_commands.handle_queue_cancel,
+    CommandType.ROOM_CREATE: rooms_commands.handle_room_create,
+    CommandType.ROOM_JOIN: rooms_commands.handle_room_join,
 }
 
 

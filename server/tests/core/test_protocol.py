@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from server.core.protocol import (
+from server.network.protocol import (
     ErrorCode,
     MalformedEnvelopeError,
     decode_envelope,

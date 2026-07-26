@@ -1,8 +1,8 @@
 import asyncio
 
 from server.auth import commands
-from server.core.protocol import ErrorCode, Envelope
-from server.network.session import ClientSession, Role
+from server.network.protocol import ErrorCode, Envelope
+from server.network.transport.session import ClientSession, Role
 from server.tests.support import build_test_context
 
 

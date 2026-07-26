@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from server.network.session import ClientSession
+from server import config
+from server.network.transport.session import ClientSession
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,7 @@ class QueueEntry:
 
 
 class MatchmakingQueue:
-    def __init__(self, elo_range: int = 100) -> None:
+    def __init__(self, elo_range: int = config.QUEUE_ELO_RANGE) -> None:
         self._elo_range = elo_range
         self._entries: list[QueueEntry] = []
 
@@ -60,7 +61,7 @@ class MatchmakingQueue:
             self._entries = [entry for entry in self._entries if id(entry) not in matched_ids]
         return pairs
 
-    def expire(self, now: float, timeout_seconds: float = 60.0) -> list[QueueEntry]:
+    def expire(self, now: float, timeout_seconds: float = config.QUEUE_TIMEOUT_SECONDS) -> list[QueueEntry]:
         expired = [entry for entry in self._entries if now - entry.joined_at >= timeout_seconds]
         if expired:
             expired_ids = {id(entry) for entry in expired}

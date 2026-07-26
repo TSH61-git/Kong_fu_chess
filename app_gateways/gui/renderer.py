@@ -9,6 +9,7 @@ from app_gateways.gui.img import Img
 from app_gateways.gui.animation.anim_state import AnimState
 from app_gateways.gui.animation.piece_animator import PieceAnimator
 from app_gateways.gui.translator import piece_dir as get_piece_dir
+from app_gateways.gui.game_over_reason import GameOverReason
 from chess_engine.engine.helpers.snapshot_models import GameSnapshot
 from chess_engine.model.piece import Color
 from chess_engine.model.position import Position
@@ -350,18 +351,18 @@ class Renderer:
         canvas.img[y0:y0 + h, :w] = sub
 
         title = "GAME  OVER"
-        if reason == "disconnect_timeout":
+        if reason == GameOverReason.DISCONNECT_TIMEOUT:
             title = "OPPONENT DISCONNECTED"
-        elif reason == "both_disconnected":
+        elif reason == GameOverReason.BOTH_DISCONNECTED:
             title = "NO CONTEST"
         canvas.put_text(title, w // 2 - 150, y0 + h // 2, 1.8, (255, 255, 255, 255), 3)
 
-        if reason == "both_disconnected":
+        if reason == GameOverReason.BOTH_DISCONNECTED:
             canvas.put_text("BOTH PLAYERS DISCONNECTED", w // 2 - 155, y0 + h // 2 + 50,
                              0.75, (0, 215, 255, 255), 2)
         elif winner_name:
             subtitle = f"{winner_name.upper()} WINS"
-            if reason == "disconnect_timeout":
+            if reason == GameOverReason.DISCONNECT_TIMEOUT:
                 subtitle += " BY FORFEIT"
             canvas.put_text(subtitle, w // 2 - 110, y0 + h // 2 + 50,
                              0.9, (0, 215, 255, 255), 2)

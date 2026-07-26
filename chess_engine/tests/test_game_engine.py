@@ -4,7 +4,7 @@ from chess_engine.model.position import Position
 from chess_engine.rules.engine import RuleEngine
 from chess_engine.engine.game_engine import GameEngine
 from chess_engine.engine.helpers.snapshot_models import MoveResult, GameSnapshot
-from app_gateways.text_cli.translator import board_from_token_lines as _board
+from chess_engine.tests.support import board_from_token_lines as _board
 
 
 def _mock_arbiter(has_active=False):

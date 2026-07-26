@@ -16,7 +16,7 @@ from server.db.schema import init_schema
 from server.db.users_repository import UsersRepository
 from server.game.registry import MatchRegistry
 from server.matchmaking.queue import MatchmakingQueue
-from server.network.context import ServerContext
+from server.network.server_context import ServerContext
 
 
 def build_test_repos() -> tuple[AuthService, MatchesRepository]:

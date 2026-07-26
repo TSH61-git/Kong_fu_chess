@@ -7,10 +7,11 @@ import re
 
 from chess_engine.model.piece import Color
 
-from server.core.protocol import Envelope, ErrorCode, encode_ack, encode_error
+from server.core.messages import MatchStatePayload
+from server.network.protocol import Envelope, ErrorCode, encode_ack, encode_error
 from server.game.match import MatchSession, create_match_session
-from server.network.context import ServerContext
-from server.network.session import ClientSession
+from server.network.server_context import ServerContext
+from server.network.transport.session import ClientSession, Role
 from server.rooms.codes import generate_room_code
 
 _logger = logging.getLogger("kfchess.rooms")
@@ -26,12 +27,13 @@ def _match_state_payload(match: MatchSession) -> dict:
     # names and score in the same response that seats/spectates them,
     # instead of relying on a broadcast they may never see.
     scores = match.stack.engine.get_scores()
-    return {
-        "white_username": match.white.username if match.white is not None else None,
-        "black_username": match.black.username if match.black is not None else None,
-        "white_score": scores[Color.WHITE],
-        "black_score": scores[Color.BLACK],
-    }
+    payload = MatchStatePayload(
+        white_username=match.white.username if match.white is not None else None,
+        black_username=match.black.username if match.black is not None else None,
+        white_score=scores[Color.WHITE],
+        black_score=scores[Color.BLACK],
+    )
+    return payload.to_dict()
 
 
 async def handle_room_create(session: ClientSession, envelope: Envelope, context: ServerContext) -> str:
@@ -60,7 +62,9 @@ async def handle_room_create(session: ClientSession, envelope: Envelope, context
     match.try_seat(session)
     match.pause_for_opponent()
     _logger.info("Room %s created by user_id=%s", code, session.user_id)
-    return encode_ack(envelope.id, {"room_id": code, "role": "white", **_match_state_payload(match)})
+    return encode_ack(
+        envelope.id, {"room_id": code, "role": Role.WHITE.name.lower(), **_match_state_payload(match)},
+    )
 
 
 async def handle_room_join(session: ClientSession, envelope: Envelope, context: ServerContext) -> str:
@@ -79,6 +83,6 @@ async def handle_room_join(session: ClientSession, envelope: Envelope, context: 
         role = session.role.name.lower()
     else:
         match.add_viewer(session)
-        role = "viewer"
+        role = Role.VIEWER.name.lower()
     _logger.info("Room %s joined by user_id=%s as %s", code, session.user_id, role)
     return encode_ack(envelope.id, {"room_id": code, "role": role, **_match_state_payload(match)})

@@ -6,9 +6,10 @@ from chess_engine.model.position import Position
 
 from server.core.bus import Bus
 from server.core.clock import FakeClock
+from server.core.wire_events import GameOverReason
 from server.game.events import RoomMatchReady, RoomStateTick
 from server.game.match import MatchSession, MatchStatus
-from server.network.session import ClientSession, Role
+from server.network.transport.session import ClientSession, Role
 from server.tests.support import build_test_repos, wait_until
 
 
@@ -127,8 +128,8 @@ class TestEnd:
     def test_end_is_idempotent(self):
         async def body():
             match = _new_match()
-            match.end(reason="king_captured")
-            match.end(reason="king_captured")
+            match.end(reason=GameOverReason.KING_CAPTURED)
+            match.end(reason=GameOverReason.KING_CAPTURED)
             await match.teardown_task
             await match.record_result_task
             assert match.status is MatchStatus.ENDED
@@ -148,7 +149,7 @@ class TestEnd:
     def test_end_tears_down_the_tick_task(self):
         async def body():
             match = _new_match(tick_ms=5)
-            match.end(reason="king_captured")
+            match.end(reason=GameOverReason.KING_CAPTURED)
             await match.teardown_task
             await wait_until(lambda: match._tick_task.done())
             assert match._tick_task.done()

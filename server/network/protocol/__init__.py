@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
+from chess_engine.rules.reasons import MoveRejectReason
+from server.core.wire_events import MessageType
+
 
 class ErrorCode(Enum):
     OK = "OK"
@@ -35,22 +38,23 @@ class ErrorCode(Enum):
     ROOM_ALREADY_EXISTS = "ROOM_ALREADY_EXISTS"
 
 
-# chess_engine's MoveResult.reason / MoveValidation.reason strings, confirmed
-# in game_engine.py and rules/guards/*.py, mapped 1:1 onto the wire vocabulary.
-_ENGINE_REASON_TO_ERROR_CODE: dict[str, ErrorCode] = {
-    "ok": ErrorCode.OK,
-    "game_over": ErrorCode.GAME_OVER,
-    "cooldown_active": ErrorCode.COOLDOWN_ACTIVE,
-    "motion_in_progress": ErrorCode.MOTION_IN_PROGRESS,
-    "destination_claimed": ErrorCode.DESTINATION_CLAIMED,
-    "illegal_piece_move": ErrorCode.ILLEGAL_PIECE_MOVE,
-    "friendly_destination": ErrorCode.FRIENDLY_DESTINATION,
-    "empty_source": ErrorCode.EMPTY_SOURCE,
-    "outside_board": ErrorCode.OUTSIDE_BOARD,
+# chess_engine's MoveResult.reason / MoveValidation.reason values (see
+# chess_engine.rules.reasons.MoveRejectReason), mapped 1:1 onto the wire
+# vocabulary.
+_ENGINE_REASON_TO_ERROR_CODE: dict[MoveRejectReason, ErrorCode] = {
+    MoveRejectReason.OK: ErrorCode.OK,
+    MoveRejectReason.GAME_OVER: ErrorCode.GAME_OVER,
+    MoveRejectReason.COOLDOWN_ACTIVE: ErrorCode.COOLDOWN_ACTIVE,
+    MoveRejectReason.MOTION_IN_PROGRESS: ErrorCode.MOTION_IN_PROGRESS,
+    MoveRejectReason.DESTINATION_CLAIMED: ErrorCode.DESTINATION_CLAIMED,
+    MoveRejectReason.ILLEGAL_PIECE_MOVE: ErrorCode.ILLEGAL_PIECE_MOVE,
+    MoveRejectReason.FRIENDLY_DESTINATION: ErrorCode.FRIENDLY_DESTINATION,
+    MoveRejectReason.EMPTY_SOURCE: ErrorCode.EMPTY_SOURCE,
+    MoveRejectReason.OUTSIDE_BOARD: ErrorCode.OUTSIDE_BOARD,
 }
 
 
-def error_code_for_engine_reason(reason: str) -> ErrorCode:
+def error_code_for_engine_reason(reason: MoveRejectReason) -> ErrorCode:
     return _ENGINE_REASON_TO_ERROR_CODE[reason]
 
 
@@ -76,12 +80,12 @@ def decode_envelope(raw: str) -> Envelope:
 
 
 def encode_ack(in_reply_to: Optional[str], data: Optional[dict[str, Any]] = None) -> str:
-    return json.dumps({"type": "ack", "in_reply_to": in_reply_to, "ok": True, "data": data or {}})
+    return json.dumps({"type": MessageType.ACK.value, "in_reply_to": in_reply_to, "ok": True, "data": data or {}})
 
 
 def encode_error(in_reply_to: Optional[str], code: ErrorCode, message: str = "") -> str:
     return json.dumps({
-        "type": "error",
+        "type": MessageType.ERROR.value,
         "in_reply_to": in_reply_to,
         "code": code.value,
         "message": message,
@@ -89,8 +93,8 @@ def encode_error(in_reply_to: Optional[str], code: ErrorCode, message: str = "")
 
 
 def encode_broadcast(room_id: str, event: str, data: dict[str, Any]) -> str:
-    return json.dumps({"type": "broadcast", "event": event, "room_id": room_id, "data": data})
+    return json.dumps({"type": MessageType.BROADCAST.value, "event": event, "room_id": room_id, "data": data})
 
 
 def encode_notice(event: str, data: dict[str, Any]) -> str:
-    return json.dumps({"type": "notice", "event": event, "data": data})
+    return json.dumps({"type": MessageType.NOTICE.value, "event": event, "data": data})

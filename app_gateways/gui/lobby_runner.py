@@ -16,14 +16,14 @@ import numpy as np
 
 from app_gateways.gui.gui_runner import _WINDOW, letterbox_transform, window_to_native
 from app_gateways.gui.renderer import BOTTOM_BAR_H, TOP_BAR_H, _PANEL_WIDTH
+from chess_engine.model.board_factory import BOARD_SIZE
 from config import CELL_SIZE
 
 SendEnvelope = Callable[[dict[str, Any]], Awaitable[None]]
 SendRequest = Callable[[dict[str, Any]], Awaitable[dict]]
 
-_BOARD_CELLS = 8
-_CANVAS_W = CELL_SIZE * _BOARD_CELLS + _PANEL_WIDTH
-_CANVAS_H = TOP_BAR_H + CELL_SIZE * _BOARD_CELLS + BOTTOM_BAR_H
+_CANVAS_W = CELL_SIZE * BOARD_SIZE + _PANEL_WIDTH
+_CANVAS_H = TOP_BAR_H + CELL_SIZE * BOARD_SIZE + BOTTOM_BAR_H
 
 _BG_COLOR = (32, 30, 28, 255)          # BGRA
 _BUTTON_COLOR = (60, 150, 60, 255)

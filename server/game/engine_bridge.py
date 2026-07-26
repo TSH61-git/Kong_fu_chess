@@ -12,7 +12,17 @@ from chess_engine.engine.game_engine import GameEngine
 from chess_engine.wire.notation import position_to_square
 
 from server.core.bus import Bus, Unsubscribe
-from server.core.protocol import encode_broadcast
+from server.core.messages import (
+    GameOverPayload,
+    MatchReadyPayload,
+    MoveAcceptedPayload,
+    OpponentDisconnectedPayload,
+    OpponentReconnectedPayload,
+    PieceCapturedPayload,
+    StateTickPayload,
+)
+from server.network.protocol import encode_broadcast
+from server.core.wire_events import GameOverReason, WireEvent
 from server.game.events import (
     RoomGameOver,
     RoomMatchReady,
@@ -22,7 +32,7 @@ from server.game.events import (
     RoomPieceCaptured,
     RoomStateTick,
 )
-from server.network.session import ClientSession
+from server.network.transport.session import ClientSession
 
 
 class EngineEventRelay:
@@ -58,7 +68,7 @@ class EngineEventRelay:
 
     def _on_game_over(self, _event: GameOver) -> None:
         self._publish(RoomGameOver(
-            ts=time.time(), room_id=self._room_id, reason="king_captured",
+            ts=time.time(), room_id=self._room_id, reason=GameOverReason.KING_CAPTURED,
             winner_username=self._winner_provider(),
         ))
 
@@ -84,47 +94,53 @@ class RoomBroadcaster:
 
 
 def _encode_move_accepted(event: RoomMoveAccepted) -> tuple[str, dict]:
-    return "move_accepted", {
-        "color": event.color.name.lower(),
-        "piece_type": event.piece_type.name.lower(),
-        "source": position_to_square(event.source),
-        "destination": position_to_square(event.destination),
-        "is_capture": event.is_capture,
-    }
+    payload = MoveAcceptedPayload(
+        color=event.color.name.lower(),
+        piece_type=event.piece_type.name.lower(),
+        source=position_to_square(event.source),
+        destination=position_to_square(event.destination),
+        is_capture=event.is_capture,
+    )
+    return WireEvent.MOVE_ACCEPTED, payload.to_dict()
 
 
 def _encode_piece_captured(event: RoomPieceCaptured) -> tuple[str, dict]:
-    return "piece_captured", {
-        "piece_type": event.piece_type.name.lower(),
-        "piece_color": event.piece_color.name.lower(),
-        "captured_by": event.captured_by.name.lower(),
-    }
+    payload = PieceCapturedPayload(
+        piece_type=event.piece_type.name.lower(),
+        piece_color=event.piece_color.name.lower(),
+        captured_by=event.captured_by.name.lower(),
+    )
+    return WireEvent.PIECE_CAPTURED, payload.to_dict()
 
 
 def _encode_game_over(event: RoomGameOver) -> tuple[str, dict]:
-    return "game_over", {"reason": event.reason, "winner_username": event.winner_username}
+    payload = GameOverPayload(reason=event.reason.value, winner_username=event.winner_username)
+    return WireEvent.GAME_OVER, payload.to_dict()
 
 
 def _encode_state_tick(event: RoomStateTick) -> tuple[str, dict]:
-    return "state_tick", {
-        "board_grid": event.board_grid,
-        "active_motions": event.active_motions,
-        "cooldowns": event.cooldowns,
-        "game_over": event.game_over,
-        "frozen": event.frozen,
-    }
+    payload = StateTickPayload(
+        board_grid=event.board_grid, active_motions=event.active_motions,
+        cooldowns=event.cooldowns, game_over=event.game_over, frozen=event.frozen,
+    )
+    return WireEvent.STATE_TICK, payload.to_dict()
 
 
 def _encode_match_ready(event: RoomMatchReady) -> tuple[str, dict]:
-    return "match_ready", {"white_username": event.white_username, "black_username": event.black_username}
+    payload = MatchReadyPayload(white_username=event.white_username, black_username=event.black_username)
+    return WireEvent.MATCH_READY, payload.to_dict()
 
 
 def _encode_opponent_disconnected(event: RoomOpponentDisconnected) -> tuple[str, dict]:
-    return "opponent_disconnected", {"role": event.role, "countdown_seconds": event.countdown_seconds}
+    payload = OpponentDisconnectedPayload(
+        role=event.role.name.lower(), countdown_seconds=event.countdown_seconds,
+    )
+    return WireEvent.OPPONENT_DISCONNECTED, payload.to_dict()
 
 
 def _encode_opponent_reconnected(event: RoomOpponentReconnected) -> tuple[str, dict]:
-    return "opponent_reconnected", {"role": event.role}
+    payload = OpponentReconnectedPayload(role=event.role.name.lower())
+    return WireEvent.OPPONENT_RECONNECTED, payload.to_dict()
 
 
 _ENCODERS: dict[type, Callable[[object], tuple[str, dict]]] = {

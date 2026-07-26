@@ -2,7 +2,7 @@ import pytest
 from chess_engine.model.position import Position
 from chess_engine.model.piece import Piece, PieceType, Color
 from chess_engine.rules.movement import legal_destinations
-from app_gateways.text_cli.translator import board_from_token_lines as _parse
+from chess_engine.tests.support import board_from_token_lines as _parse
 
 
 class TestRookLegalDestinations:

@@ -27,6 +27,19 @@ from chess_engine.wire.state import deserialize_cooldowns, deserialize_motions
 SendEnvelope = Callable[[dict[str, Any]], Awaitable[None]]
 
 
+@dataclass(frozen=True)
+class OutboundCommand:
+    # Typed move/jump command; converted to a dict only at the boundary
+    # where it's handed to the transport layer's send_envelope callable.
+    # Deliberately not shared with server.core.messages — the GUI must stay
+    # a plain client of the wire protocol, never a dependency of server/.
+    command_type: str
+    cmd: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": self.command_type, "data": {"cmd": self.cmd}}
+
+
 class NetworkGameFacade:
     # Stands in for both `runtime.engine` and `runtime.arbiter` — GuiRunner
     # only ever calls methods on them, never checks their type — and is the
@@ -192,8 +205,8 @@ class NetworkGameFacade:
         if piece is None:
             return
         cmd = build_move_command(piece.color, piece.piece_type, source, destination)
-        envelope = {"type": command_type, "data": {"cmd": cmd}}
-        asyncio.create_task(self._send_envelope(envelope))
+        command = OutboundCommand(command_type=command_type, cmd=cmd)
+        asyncio.create_task(self._send_envelope(command.to_dict()))
 
 
 @dataclass

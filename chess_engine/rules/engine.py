@@ -11,6 +11,7 @@ from chess_engine.rules.guards import (
     friendly_fire_guard,
     legal_move_guard,
 )
+from chess_engine.rules.reasons import MoveRejectReason
 
 _GUARDS = [
     boundary_guard,
@@ -40,4 +41,4 @@ class RuleEngine:
             reason = guard.check(board, source, destination)
             if reason is not None:
                 return MoveValidation(is_valid=False, reason=reason)
-        return MoveValidation(is_valid=True, reason="ok")
+        return MoveValidation(is_valid=True, reason=MoveRejectReason.OK)

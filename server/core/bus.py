@@ -12,6 +12,8 @@ Unsubscribe = Callable[[], None]
 
 _logger = logging.getLogger("kfchess.bus")
 
+_DEFAULT_QUEUE_MAXSIZE = 1000
+
 
 class _Subscription:
     def __init__(self, topic: str, handler: Handler, maxsize: int) -> None:
@@ -35,7 +37,7 @@ class Bus:
     def __init__(self) -> None:
         self._subscriptions: dict[str, list[_Subscription]] = {}
 
-    def subscribe(self, topic: str, handler: Handler, maxsize: int = 1000) -> Unsubscribe:
+    def subscribe(self, topic: str, handler: Handler, maxsize: int = _DEFAULT_QUEUE_MAXSIZE) -> Unsubscribe:
         subscription = _Subscription(topic, handler, maxsize)
         self._subscriptions.setdefault(topic, []).append(subscription)
 

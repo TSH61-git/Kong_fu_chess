@@ -12,10 +12,10 @@ import uuid
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from server.core.protocol import ErrorCode, MalformedEnvelopeError, decode_envelope, encode_error
-from server.network.context import ServerContext
+from server.network.protocol import ErrorCode, MalformedEnvelopeError, decode_envelope, encode_error
+from server.network.server_context import ServerContext
 from server.network.dispatch import dispatch
-from server.network.session import ClientSession
+from server.network.transport.session import ClientSession
 
 _logger = logging.getLogger("kfchess.network")
 

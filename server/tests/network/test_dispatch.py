@@ -1,10 +1,10 @@
 import asyncio
 
 from server.core.bus import Bus
-from server.core.protocol import ErrorCode, Envelope
+from server.network.protocol import ErrorCode, Envelope
 from server.game.match import MatchSession
 from server.network.dispatch import dispatch
-from server.network.session import ClientSession, Role
+from server.network.transport.session import ClientSession, Role
 from server.tests.support import build_test_context, build_test_repos
 
 

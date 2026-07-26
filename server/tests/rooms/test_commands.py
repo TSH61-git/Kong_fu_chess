@@ -3,8 +3,8 @@ import asyncio
 from chess_engine.engine.events import PieceCaptured
 from chess_engine.model.piece import Color, Piece, PieceType
 
-from server.core.protocol import ErrorCode, Envelope
-from server.network.session import ClientSession, Role
+from server.network.protocol import ErrorCode, Envelope
+from server.network.transport.session import ClientSession, Role
 from server.rooms import commands
 from server.tests.support import build_test_context
 

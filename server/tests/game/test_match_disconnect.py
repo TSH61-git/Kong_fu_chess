@@ -4,7 +4,7 @@ from server.core.bus import Bus
 from server.core.clock import FakeClock
 from server.game.events import RoomOpponentDisconnected, RoomOpponentReconnected, RoomStateTick
 from server.game.match import MatchSession
-from server.network.session import ClientSession, Role
+from server.network.transport.session import ClientSession, Role
 from server.tests.support import build_test_repos, wait_until
 
 
@@ -62,7 +62,7 @@ class TestHandleDisconnect:
                 assert match.is_frozen is True
                 await wait_until(lambda: any(isinstance(e, RoomOpponentDisconnected) for e in received))
                 event = next(e for e in received if isinstance(e, RoomOpponentDisconnected))
-                assert event.role == "white"
+                assert event.role == Role.WHITE
                 assert event.countdown_seconds == 5.0
             finally:
                 if match._disconnect_task is not None:

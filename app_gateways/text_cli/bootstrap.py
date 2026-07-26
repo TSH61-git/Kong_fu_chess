@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from chess_engine.model.board import Board
+from chess_engine.model.board_factory import BOARD_SIZE
 from chess_engine.realtime.arbiter import RealTimeArbiter
 from chess_engine.rules.engine import RuleEngine
 from chess_engine.engine.game_engine import GameEngine
@@ -24,7 +25,7 @@ class GameRuntime:
 def bootstrap_game_system(board: Optional[Board] = None):
     from app_gateways.text_cli.console_runner import ConsoleRunner
 
-    resolved_board = board if board is not None else Board(rows=8, cols=8)
+    resolved_board = board if board is not None else Board(rows=BOARD_SIZE, cols=BOARD_SIZE)
     rule_engine = RuleEngine()
     arbiter = RealTimeArbiter(board=resolved_board, game_engine=None)
     engine = GameEngine(board=resolved_board, rule_engine=rule_engine, arbiter=arbiter)

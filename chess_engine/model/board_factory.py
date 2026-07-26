@@ -5,6 +5,8 @@ from chess_engine.model.board import Board
 from chess_engine.model.piece import Color, Piece, PieceType
 from chess_engine.model.position import Position
 
+BOARD_SIZE = 8
+
 _BACK_RANK = [
     PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN,
     PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK,
@@ -13,7 +15,7 @@ _BACK_RANK = [
 
 def standard_board() -> Board:
     # Build a standard 8×8 starting position board using typed Piece objects.
-    board = Board(rows=8, cols=8)
+    board = Board(rows=BOARD_SIZE, cols=BOARD_SIZE)
     for col, piece_type in enumerate(_BACK_RANK):
         board.set(Position(0, col), Piece(piece_type, Color.BLACK))
         board.set(Position(1, col), Piece(PieceType.PAWN, Color.BLACK))

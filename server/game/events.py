@@ -11,6 +11,8 @@ from chess_engine.model.piece import Color, PieceType
 from chess_engine.model.position import Position
 
 from server.core.events import ServerEvent
+from server.core.wire_events import GameOverReason
+from server.network.transport.session import Role
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ class RoomPieceCaptured(RoomEvent):
 
 @dataclass(frozen=True)
 class RoomGameOver(RoomEvent):
-    reason: str
+    reason: GameOverReason
     winner_username: Optional[str] = None
 
 
@@ -57,10 +59,10 @@ class RoomStateTick(RoomEvent):
 
 @dataclass(frozen=True)
 class RoomOpponentDisconnected(RoomEvent):
-    role: str
+    role: Role
     countdown_seconds: float
 
 
 @dataclass(frozen=True)
 class RoomOpponentReconnected(RoomEvent):
-    role: str
+    role: Role

@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 from chess_engine.model.piece import Piece, PieceType, Color, PieceState
 from chess_engine.model.position import Position
 from chess_engine.realtime.arbiter import RealTimeArbiter
-from app_gateways.text_cli.translator import board_from_token_lines as _parse
+from chess_engine.tests.support import board_from_token_lines as _parse
 
 _WR = Piece(PieceType.ROOK, Color.WHITE)
 _BK = Piece(PieceType.KING, Color.BLACK)

@@ -60,3 +60,19 @@ OpenCV/numpy-based renderer, layered on top of the same `GameRuntime` the text C
 ### Working across the engine/GUI boundary
 
 When adding a new piece of engine state that the GUI needs to display, prefer exposing it as a new event + helper (as done for score/history) or a new field on `GameSnapshot`/a frozen DTO like `PieceInfo`/`CapturedEntry`, rather than handing the GUI a live `Piece`/`Board` reference — the existing code deliberately keeps mutable domain objects on the engine side of the boundary.
+
+### Multiplayer server (`server/`)
+
+A real, working single-process asyncio WebSocket server sits alongside the local-only `text_cli`/`gui` gateways — `chess_engine` stays 100% unaware of it (zero imports of `websockets`/`asyncio`/`server.*` anywhere under `chess_engine/`), and the GUI stays a plain client of the wire protocol (`app_gateways/gui/` never imports from `server/`). Run it with `python -m server.main`; the reference client is `python -m server.dev_client` (shell auth, then hands off to the same OpenCV GUI via `app_gateways/gui/network_facade.py`).
+
+`server/network/` is split into three sub-packages so the transport can be swapped without touching dispatch/protocol logic:
+- `transport/` — `server.py` (accept loop, `serve_forever`) and `session.py` (`ClientSession`, `Role`). Owns zero game rules.
+- `protocol/` — envelope encode/decode and the `ErrorCode` vocabulary (`Envelope`, `encode_ack/error/broadcast/notice`, `decode_envelope`).
+- `dispatch/` — the command-type → handler table (`dispatch()`) that `transport/server.py` calls per inbound message.
+- `server/network/server_context.py` — `ServerContext`, the shared per-process object (auth service, bus, registry, queue, matches repo) handed to every dispatch handler; kept outside the three sub-packages since it's cross-cutting, not owned by one of them.
+
+Other top-level `server/` packages: `core/` (shared `Bus` pub/sub, `Clock`, server-level domain events, `wire_events.py`'s `MessageType`/`WireEvent`/`CommandType`/`GameOverReason` enums, and `messages.py`'s wire-payload DTOs — the single typed source of truth for message shape, imported by both `server/game/engine_bridge.py` on the send side and `server/dev_client.py` on the receive side), `game/` (`MatchSession`, `EngineEventRelay`/`RoomBroadcaster` bridging chess_engine's synchronous `EventManager` onto the async `Bus`), `matchmaking/`, `rooms/` (custom room codes), `auth/`, `db/` (SQLite), `rating/` (Elo).
+
+Move/game-over reason vocabulary is centralized in `chess_engine/rules/reasons.py` (`MoveRejectReason`) and `server/core/wire_events.py` (`GameOverReason`) rather than passed as raw strings; the GUI keeps its own local mirror (`app_gateways/gui/game_over_reason.py`) instead of importing the server's, to preserve the one-way gateway → engine dependency direction.
+
+`Server_Design.md` at the repo root is a separate, largely unimplemented proposal for decomposing this single-process server into a distributed microservices/K8s platform — it describes a future target, not the code under `server/` today.

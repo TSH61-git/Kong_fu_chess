@@ -9,7 +9,8 @@ from server import config
 from server.auth.service import AuthService
 from server.core.bus import Bus
 from server.core.clock import Clock
-from server.core.protocol import encode_notice
+from server.network.protocol import encode_notice
+from server.core.wire_events import WireEvent
 from server.db.matches_repository import MatchesRepository
 from server.game.match import create_match_session
 from server.game.registry import MatchRegistry
@@ -51,7 +52,7 @@ class Matchmaker:
             await self._seat_pair(entry_a, entry_b)
 
         for entry in self._queue.expire(now, self._timeout_seconds):
-            await entry.session.send(encode_notice("queue_timeout", {}))
+            await entry.session.send(encode_notice(WireEvent.QUEUE_TIMEOUT, {}))
 
     async def _seat_pair(self, entry_a: QueueEntry, entry_b: QueueEntry) -> None:
         match = create_match_session(
@@ -63,4 +64,4 @@ class Matchmaker:
             match.try_seat(entry.session)
             # Same "seated" notice shape auth/commands.py used to send at
             # login-time seating, before Phase 3 moved seating here.
-            await entry.session.send(encode_notice("seated", {"role": entry.session.role.name.lower()}))
+            await entry.session.send(encode_notice(WireEvent.SEATED, {"role": entry.session.role.name.lower()}))

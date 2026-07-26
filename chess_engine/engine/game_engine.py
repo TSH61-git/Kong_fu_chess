@@ -13,12 +13,14 @@ from chess_engine.model.board import Board
 from chess_engine.model.piece import Color
 from chess_engine.model.position import Position
 from chess_engine.rules.engine import RuleEngine
+from chess_engine.rules.reasons import MoveRejectReason
+from config import JUMP_DURATION_MS
 
-_OK = "ok"
-_GAME_OVER = "game_over"
-_COOLDOWN_ACTIVE = "cooldown_active"
-_MOTION_IN_PROGRESS = "motion_in_progress"
-_DESTINATION_CLAIMED = "destination_claimed"
+_OK = MoveRejectReason.OK
+_GAME_OVER = MoveRejectReason.GAME_OVER
+_COOLDOWN_ACTIVE = MoveRejectReason.COOLDOWN_ACTIVE
+_MOTION_IN_PROGRESS = MoveRejectReason.MOTION_IN_PROGRESS
+_DESTINATION_CLAIMED = MoveRejectReason.DESTINATION_CLAIMED
 
 
 def _is_piece_in_flight(arbiter, source: Position) -> bool:
@@ -100,9 +102,9 @@ class GameEngine:
             return MoveResult(is_accepted=False, reason=_MOTION_IN_PROGRESS)
         jumping_piece = self._board.get(position)
         if jumping_piece is None:
-            return MoveResult(is_accepted=False, reason="empty_source")
+            return MoveResult(is_accepted=False, reason=MoveRejectReason.EMPTY_SOURCE)
         self._arbiter.start_motion(
-            piece=jumping_piece, source=position, destination=position, duration_ms=1000,
+            piece=jumping_piece, source=position, destination=position, duration_ms=JUMP_DURATION_MS,
         )
         self._events.publish(MoveAccepted(
             color=jumping_piece.color,
