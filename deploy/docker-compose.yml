@@ -1,0 +1,241 @@
+# Local dev stack for Kong Fu Chess, wired per Server_Design.md §4 ("Local
+# dev... runs Citus (coordinator + 2 workers), Redis, and all four
+# services wired the same way production is wired").
+#
+# INFRA-FIRST SCOPE (see CLAUDE.md / this repo's Server_Design.md, which is
+# explicitly "a future target, not the code under server/ today"):
+#   - Citus (coordinator + 2 workers), Redis, and kfc-migrations are real
+#     and fully wired: `citus-init` registers both workers with the
+#     coordinator, then kfc-migrations applies Alembic migrations +
+#     Citus create_distributed_table DDL against the resulting cluster.
+#   - kfc-gateway runs the actual, working game server (server/main.py:
+#     login, matchmaking, and room hosting in one asyncio process,
+#     SQLite-backed) — this is what makes `docker compose up` playable
+#     end-to-end today. Its SQLite data is separate from the Citus schema
+#     kfc-migrations creates; porting kfc-gateway's repositories onto
+#     Citus is Server_Design.md Phase 2, not done here.
+#   - kfc-matchmaker, kfc-game-server, kfc-event-consumer are real running
+#     containers that prove the compose wiring (they connect to Redis
+#     and/or Postgres and serve /healthz+/metrics on 9090) but do not yet
+#     carry the business logic Server_Design.md assigns them — that
+#     extraction is Phase 1. See each service's src/main.py docstring.
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.yml up --build
+#   Client (text_cli/GUI) connects to localhost:8765, exactly as today.
+
+networks:
+  kfc-internal:
+    driver: bridge
+  kfc-public:
+    driver: bridge
+
+volumes:
+  citus-coordinator-data:
+  citus-worker-1-data:
+  citus-worker-2-data:
+  redis-data:
+  # kfc-gateway's SQLite file (infra-first scope note above): Server_Design.md
+  # ADR-005/§5 calls for kfc-gateway/game-hosting to be stateless-on-disk in
+  # production; this volume exists only because the real, playable monolith
+  # this container runs is still SQLite-backed pending the Phase 2 Citus port.
+  kfc-gateway-data:
+
+x-postgres-env: &postgres-env
+  POSTGRES_USER: ${POSTGRES_USER:-kfchess}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kfchess}
+  POSTGRES_DB: ${POSTGRES_DB:-kfchess}
+
+services:
+  # ---------------------------------------------------------------- Citus
+  citus-coordinator:
+    image: citusdata/citus:12.1
+    hostname: citus-coordinator
+    environment:
+      <<: *postgres-env
+      CITUS_HOST: citus-coordinator
+    volumes:
+      - citus-coordinator-data:/var/lib/postgresql/data
+    networks:
+      - kfc-internal
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kfchess} -d ${POSTGRES_DB:-kfchess}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  citus-worker-1:
+    image: citusdata/citus:12.1
+    hostname: citus-worker-1
+    environment:
+      <<: *postgres-env
+    volumes:
+      - citus-worker-1-data:/var/lib/postgresql/data
+    networks:
+      - kfc-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kfchess} -d ${POSTGRES_DB:-kfchess}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  citus-worker-2:
+    image: citusdata/citus:12.1
+    hostname: citus-worker-2
+    environment:
+      <<: *postgres-env
+    volumes:
+      - citus-worker-2-data:/var/lib/postgresql/data
+    networks:
+      - kfc-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kfchess} -d ${POSTGRES_DB:-kfchess}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # citus_add_node must run exactly once the coordinator and both workers
+  # are up; create_distributed_table (kfc-migrations) then requires it to
+  # have already happened. One-shot container, not a long-running service.
+  citus-init:
+    image: citusdata/citus:12.1
+    environment:
+      <<: *postgres-env
+      COORDINATOR_HOST: citus-coordinator
+      COORDINATOR_PORT: "5432"
+      WORKER_1_HOST: citus-worker-1
+      WORKER_2_HOST: citus-worker-2
+      WORKER_PORT: "5432"
+      PGPASSWORD: ${POSTGRES_PASSWORD:-kfchess}
+    volumes:
+      - ./citus/register-workers.sh:/register-workers.sh:ro
+    entrypoint: ["bash", "/register-workers.sh"]
+    networks:
+      - kfc-internal
+    depends_on:
+      citus-coordinator:
+        condition: service_healthy
+      citus-worker-1:
+        condition: service_healthy
+      citus-worker-2:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------- Redis
+  redis:
+    image: redis:7-alpine
+    hostname: redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - kfc-internal
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # ------------------------------------------------------------ Migrations
+  kfc-migrations:
+    build:
+      context: ..
+      dockerfile: services/kfc-migrations/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kfchess}:${POSTGRES_PASSWORD:-kfchess}@citus-coordinator:5432/${POSTGRES_DB:-kfchess}
+    networks:
+      - kfc-internal
+    depends_on:
+      citus-init:
+        condition: service_completed_successfully
+
+  # ------------------------------------------------------------- Services
+  kfc-gateway:
+    build:
+      context: ..
+      dockerfile: services/kfc-gateway/Dockerfile
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8765"
+      METRICS_PORT: "9090"
+      DB_PATH: "/data/kfchess.db"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kfchess}:${POSTGRES_PASSWORD:-kfchess}@citus-coordinator:5432/${POSTGRES_DB:-kfchess}
+    volumes:
+      - kfc-gateway-data:/data
+    networks:
+      - kfc-internal
+      - kfc-public
+    ports:
+      - "8765:8765"
+      - "9090:9090"
+    depends_on:
+      redis:
+        condition: service_healthy
+      kfc-migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  kfc-matchmaker:
+    build:
+      context: ..
+      dockerfile: services/kfc-matchmaker/Dockerfile
+    environment:
+      METRICS_PORT: "9090"
+      REDIS_URL: redis://redis:6379/0
+    networks:
+      - kfc-internal
+    ports:
+      - "9091:9090"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  kfc-game-server:
+    build:
+      context: ..
+      dockerfile: services/kfc-game-server/Dockerfile
+    environment:
+      METRICS_PORT: "9090"
+      REDIS_URL: redis://redis:6379/0
+    networks:
+      - kfc-internal
+      - kfc-public
+    ports:
+      - "9092:9090"
+      - "7000:7000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  kfc-event-consumer:
+    build:
+      context: ..
+      dockerfile: services/kfc-event-consumer/Dockerfile
+    environment:
+      METRICS_PORT: "9090"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kfchess}:${POSTGRES_PASSWORD:-kfchess}@citus-coordinator:5432/${POSTGRES_DB:-kfchess}
+    networks:
+      - kfc-internal
+    ports:
+      - "9093:9090"
+    depends_on:
+      redis:
+        condition: service_healthy
+      kfc-migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped

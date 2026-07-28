@@ -60,10 +60,20 @@ server/                 Single-process asyncio + WebSockets multiplayer server
   ├─ matchmaking/         Elo-ranged queue
   ├─ rooms/               Custom room codes / aliases, freeze-until-opponent, spectator seating
   ├─ game/                Per-match runtime (tick loop, viewers) + engine↔wire event relay
-  └─ db/                  SQLite persistence
+  ├─ db/                  SQLite persistence
+  └─ observability/       Shared /healthz + /metrics HTTP server, Redis/Postgres connectivity probes
+services/               Docker Compose services for the containerized backend (see below)
+  ├─ kfc-gateway/         Runs the real server/ monolith above + health/metrics sidecar
+  ├─ kfc-matchmaker/      Scaffold container (Redis-connected; no matchmaking logic yet)
+  ├─ kfc-game-server/     Scaffold container (Redis-connected; ports 7000 + 9090)
+  ├─ kfc-event-consumer/  Scaffold container (Redis + Postgres-connected)
+  └─ kfc-migrations/      One-shot Alembic + Citus create_distributed_table runner
+deploy/                 docker-compose.yml + Citus worker-registration script
 ```
 
-Data flows one way: `chess_engine` never imports from `app_gateways` or `server` — both sit on top of it as thin, swappable translators between the engine's typed objects and their own I/O (pixels, stdin, or JSON over a socket).
+Data flows one way: `chess_engine` never imports from `app_gateways` or `server` — both sit on top of it as thin, swappable translators between the engine's typed objects and their own I/O (pixels, stdin, or JSON over a socket). `server/` likewise never imports from `services/` — the compose services wrap it, not the other way around.
+
+`Server_Design.md` documents a target distributed architecture (Citus-sharded Postgres, Redis-backed presence/matchmaking, an event bus, Kubernetes) for this same `server/` codebase at much larger scale. `deploy/docker-compose.yml` and `services/kfc-*` are an **infra-first scaffold** toward that design: Citus, Redis, and the Alembic/Citus migrations are real and fully wired; `kfc-gateway` runs the actual working game server; `kfc-matchmaker`/`kfc-game-server`/`kfc-event-consumer` are real containers proving the wiring but don't yet carry the business logic Server_Design.md assigns them (see each service's `src/main.py` docstring for specifics).
 
 ---
 
@@ -71,6 +81,7 @@ Data flows one way: `chess_engine` never imports from `app_gateways` or `server`
 
 - Python 3
 - Git
+- Docker Desktop (or another Docker Compose v2 runtime) — only needed for the Docker backend path below
 
 ---
 
@@ -110,6 +121,40 @@ That installs `opencv-python` (rendering), `numpy` (board/pixel math), and `webs
 
 Each client prompts you to register or log in, then opens the same graphical window — one button joins matchmaking, another creates or joins a custom room by code.
 
+**Play over the network via Docker (backend in containers, GUI on your machine):**
+
+`deploy/docker-compose.yml` runs the multiplayer backend — `kfc-gateway`
+(the real game server: login, matchmaking, rooms), Citus-sharded Postgres,
+and Redis — in containers. The OpenCV GUI window can't run inside a Linux
+container, so it stays on your machine and connects to the containerized
+server exactly like the plain network mode above.
+
+```bash
+# 1. Start the backend stack (from repo root)
+docker compose -f deploy/docker-compose.yml up --build -d
+
+# 2. Wait for containers to report healthy
+docker compose -f deploy/docker-compose.yml ps
+
+# 3. Run the GUI client on your machine, once per player/spectator
+#    (no URI needed — it defaults to ws://localhost:8765, the port
+#    kfc-gateway publishes to the host)
+./venv/Scripts/python.exe -m server.dev_client
+```
+
+From here it's identical to the plain network mode: register/log in in
+the terminal, then use the graphical lobby (PLAY to matchmake, ROOM to
+create/join a custom room by code) — open a second terminal and repeat
+step 3 with a different account for the second player.
+
+Shut the stack down with `docker compose -f deploy/docker-compose.yml down`
+(add `-v` to also wipe the SQLite/Redis/Citus volumes). See
+`Server_Design.md` for the target architecture this stack is scaffolding
+toward, and each `services/kfc-*/src/main.py` for what's real vs. still a
+placeholder — `kfc-matchmaker`, `kfc-game-server`, and `kfc-event-consumer`
+run as containers but don't yet carry gameplay logic; all real play
+currently goes through `kfc-gateway`.
+
 **Run the tests:**
 
 ```bash
@@ -123,8 +168,12 @@ Each client prompts you to register or log in, then opens the same graphical win
 - **Python** throughout
 - **OpenCV + NumPy** for the graphical client's rendering and sprite animation
 - **asyncio + websockets** for the multiplayer server and its reference client
-- **SQLite** for account/match persistence
+- **SQLite** for account/match persistence (the containerized `kfc-gateway` too — see Architecture)
 - **pytest** for the test suite
+- **Docker + Docker Compose** to run the backend as containers (`deploy/docker-compose.yml`)
+- **Citus-sharded Postgres + Alembic** for the distributed data-layer scaffold (`services/kfc-migrations`)
+- **Redis** for the queue/presence/checkpoint scaffold, used by the `kfc-matchmaker`/`kfc-game-server`/`kfc-event-consumer` containers
+- **Prometheus client** for the `/metrics` endpoint every containerized service exposes on `:9090`
 
 ---
 

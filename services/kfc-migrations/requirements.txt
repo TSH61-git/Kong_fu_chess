@@ -1,0 +1,6 @@
+# kfc-migrations is a standalone one-off runner (Server_Design.md §5/§9
+# Phase 2) — deliberately not sharing requirements-server.txt so it stays
+# independent of the long-running services it migrates ahead of.
+alembic>=1.13
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9

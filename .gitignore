@@ -21,6 +21,10 @@ MANIFEST
 # ── Server data ───────────────────────────────────────────────────────
 server/*.db
 
+# ── Local-only trusted CAs (e.g. corporate proxy) for docker builds ────
+certs/*.crt
+certs/*.pem
+
 # ── Testing & coverage ────────────────────────────────────────────────
 .pytest_cache/
 .coverage

@@ -1,0 +1,10 @@
+# Server-side services only (server/, chess_engine/, services/kfc-*).
+# Deliberately excludes opencv-python/numpy (app_gateways/gui only) so
+# container images built from requirements-server.txt stay slim.
+websockets>=16.0
+redis>=5.0
+psycopg2-binary>=2.9
+SQLAlchemy>=2.0
+alembic>=1.13
+aiohttp>=3.9
+prometheus-client>=0.20
